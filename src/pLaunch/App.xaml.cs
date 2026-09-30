@@ -53,6 +53,8 @@ public partial class App : Application
         {
             if (args is [SingleInstance.ReloadCommand])
                 window.ReloadData(); // another list moved the data folder
+            else if (args is [SingleInstance.LaunchedCommand, var id])
+                window.CountLaunch(id); // launched from the jump list
             else if (args.Count > 0)
                 window.AddFromArguments(args);
             else

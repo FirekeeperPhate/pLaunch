@@ -100,7 +100,7 @@
 
                 <!-- Sub-folders: how many shortcuts, and a chevron (a click opens it) -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal"
-                            Visibility="{Binding IsGroup, Converter={StaticResource BoolToVisibility}}">
+                            Visibility="{Binding IsNavigable, Converter={StaticResource BoolToVisibility}}">
                     <TextBlock VerticalAlignment="Center" FontSize="12" Text="{Binding ChildInfo}"
                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                     <TextBlock Margin="8,0,2,0" Text="&#xE76C;" Style="{StaticResource Glyph}" FontSize="12"
@@ -249,10 +249,24 @@
                 </DockPanel>
             </Border>
 
+            <!-- Search: appears as soon as something is typed; filters the whole list (every sub-folder) -->
+            <Border x:Name="SearchBar" Padding="8,6" BorderThickness="0,0,0,1" Visibility="Collapsed"
+                    BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Left" Margin="2,0,8,0" Text="&#xE721;" Style="{StaticResource Glyph}"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <Button DockPanel.Dock="Right" Margin="6,0,0,0" Style="{StaticResource FooterButton}" ToolTip="Clear (Esc)"
+                            Click="ClearSearch_Click">
+                        <TextBlock Text="&#xE711;" Style="{StaticResource Glyph}" FontSize="12" />
+                    </Button>
+                    <TextBox x:Name="SearchBox" TextChanged="SearchBox_TextChanged" PreviewKeyDown="SearchBox_PreviewKeyDown" />
+                </DockPanel>
+            </Border>
+
             <!-- Extended: Ctrl+click / Shift+click select several items, Enter opens them all -->
             <ListBox x:Name="List" Grid.Row="1" Margin="4,6,4,2" Background="Transparent" BorderThickness="0"
                      SelectionMode="Extended"
-                     IsTextSearchEnabled="True" TextSearch.TextPath="Name"
+                     IsTextSearchEnabled="False"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      VirtualizingPanel.IsVirtualizing="False"
                      PreviewMouseLeftButtonDown="List_PreviewMouseLeftButtonDown"

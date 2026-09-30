@@ -122,14 +122,14 @@ public partial class PopupWindow
         OpenList(profile);
     }
 
-    void ChangeButtonIcon()
+    internal void ChangeButtonIcon()
     {
         if (ShowModal(() => ShellInterop.PickIcon(_hwnd, _settings.ButtonIconPath, _settings.ButtonIconIndex)) is var (path, index))
             SetButtonIcon(path, index);
         Activate();
     }
 
-    void SetButtonIcon(string? path, int index)
+    internal void SetButtonIcon(string? path, int index)
     {
         _settings.ButtonIconPath = path;
         _settings.ButtonIconIndex = path == null ? 0 : index;

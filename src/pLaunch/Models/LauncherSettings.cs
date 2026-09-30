@@ -18,6 +18,8 @@ public enum SortMode
     Custom,
     /// <summary>By name, sub-folders first, each section between separators sorted on its own.</summary>
     Alphabetical,
+    /// <summary>Most launched first (then most recent, then by name), sub-folders first, per section.</summary>
+    MostUsed,
 }
 
 public enum ThemeChoice
@@ -49,4 +51,9 @@ public sealed class LauncherSettings
     /// </summary>
     public string? ButtonIconPath { get; set; }
     public int ButtonIconIndex { get; set; }
+    /// <summary>
+    /// Global shortcut that opens (and closes) the popup; "" = none. The main list starts with
+    /// Win+Alt+Space; new lists start without one (two lists cannot share it).
+    /// </summary>
+    public string Hotkey { get; set; } = "Win+Alt+Space";
 }

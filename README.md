@@ -5,7 +5,10 @@ shortcuts (programs, files, folders, web links, Store apps).
 
 ## Use
 
-- **Click** the pLaunch taskbar button to open the list; click an item to launch it.
+- **Click** the pLaunch taskbar button to open the list, or press **Win+Alt+Space** from anywhere
+  (changeable in Settings); click an item to launch it.
+- **Search**: just start typing in the open list. It finds items in every sub-folder (accents and case
+  don't matter; best matches and the most used first); Enter launches the first result, Esc clears.
 - **Add** items by dragging them onto the list. You can also drag them onto the taskbar button and
   hold there for a moment: the list opens and you drop into it. The *Add* button and **Ctrl+V** work too.
 - **Right click** an item: open, run as administrator, open file location, rename, remove, and add a
@@ -13,27 +16,33 @@ shortcuts (programs, files, folders, web links, Store apps).
 - **Sub-folders** (Add → New sub-folder) open inside the popup, with a back button. Drop an item on a
   sub-folder to move it in; hold a drag over a sub-folder to open it, over the back button to go up;
   drop on the back button to move an item up one level. **Separators** (Add → Separator) divide the list.
+- **Live folders**: in a folder's Properties tick *Show the folder's content inside pLaunch*. The folder then
+  opens inside the popup like a sub-folder, showing what is on the disk right now (Downloads, a project
+  folder…). Its entries are read-only; right click → *Add to pLaunch* keeps a copy of one.
 - **… → View**: List, Tiles (big icon, name below) or Icons only (names in the tooltips).
-  **… → Size**: small, medium, large. **… → Sort**: custom (drag to arrange) or alphabetical — each
-  section between separators is sorted on its own, sub-folders first, and the custom order is kept for
-  when you switch back.
-- **… → Theme**: System (follows Windows), Light, Dark. **… → Background**: the Windows acrylic, a preset
-  color, or any color from the Windows color picker; *Translucent* lets a little of the acrylic show
-  through. With a custom background the text turns light or dark by itself so it stays readable.
-- **Keyboard**: arrows and first letters to move, Enter to launch or open a sub-folder
-  (Ctrl+Shift+Enter = as administrator), **1–9** open the first nine items, Backspace or Alt+Left to go
-  back, F2 rename, Alt+Enter properties, Del remove, Esc close.
+  **… → Sort**: custom (drag to arrange), alphabetical or **most used** (pLaunch counts the launches) —
+  each section between separators is sorted on its own, sub-folders first, and the custom order is kept
+  for when you switch back.
+- **… → Settings**: view, size, order, theme (System, Light, Dark), background (the Windows acrylic, a
+  preset color or any color; *Translucent* lets a little of the acrylic show through), website icons,
+  start with Windows, the list's shortcut, backup and sync, updates. Changes apply right away.
+- **Keyboard**: arrows to move, Enter to launch or open a sub-folder (Ctrl+Shift+Enter = as
+  administrator), **1–9** open the first nine items, Backspace or Alt+Left to go back, F2 rename,
+  Alt+Enter properties, Del remove, Ctrl+F search, Esc close.
 - **Several at once**: Ctrl+click and Shift+click select several items; Enter (or right click → Open
   selected) launches them all. A sub-folder's menu has *Open all*.
-- **Properties** (right click, Alt+Enter): name, target or URL, arguments, start-in folder, *always run as
-  administrator*, and a custom icon (the Windows icon picker; sub-folders can have one too).
+- **Properties** (right click, Alt+Enter): name, target or URL, arguments, start-in folder, the window
+  it starts in (normal, minimized, maximized), *always run as administrator*, a custom icon (sub-folders
+  can have one too) and a **shortcut** of its own that launches the item from anywhere (e.g. Ctrl+Alt+N);
+  it also shows how many times the item was opened.
 - **Drag out**: drag an item onto the desktop or into Explorer to get a shortcut to it (files and folders
   are only ever linked, never moved or copied), or into another list.
-- **Website icons**: web links show the site's icon, fetched once and cached (… → Website icons turns it off).
+- **Website icons**: web links show the site's icon, fetched once and cached (it can be turned off in Settings).
 - The taskbar button's jump list (right click on the button) contains the same items, grouped by sub-folder.
 
-Pin pLaunch to the taskbar and turn on **… → Start with Windows**. The drag-and-hover trick needs
-pLaunch to be running: Windows only brings forward the windows of apps that are already open.
+Pin pLaunch to the taskbar and turn on **Start with Windows** in Settings. The drag-and-hover trick and
+the shortcuts need pLaunch to be running: Windows only brings forward the windows of apps that are
+already open.
 
 ### Several lists
 
@@ -43,7 +52,7 @@ started with `pLaunch --list "Name"`.
 
 ### Backup and sync
 
-**… → Backup and sync**: export a list to a file, import one (replacing the list or as a sub-folder), or
+**Settings → Backup and sync**: export a list to a file, import one (replacing the list or as a sub-folder), or
 move the data folder, for example into OneDrive to share the lists between PCs. A list reloads by itself
 when its file is changed from elsewhere.
 
@@ -53,7 +62,7 @@ it, unless the data folder was moved. The `PLAUNCH_DATA_DIR` environment variabl
 
 ### Updates
 
-pLaunch checks the GitHub releases once a day (… → Updates). When a newer version is out, a banner in the
+pLaunch checks the GitHub releases once a day (Settings → Updates). When a newer version is out, a banner in the
 list and a badge on the taskbar button offer it: the installer of the same edition is downloaded, checked
 against its published SHA-256 digest and installed silently; every open list closes and starts again.
 
@@ -101,4 +110,6 @@ like a popup.
 - `Services/JumpListBuilder` — the jump list entries run `pLaunch [--list Name] --launch <id>`
 - `Services/ListProfile` — one list per process: file, AppUserModelID (own taskbar button), pipe, autostart
 - `Services/FaviconService`, `Services/UpdateService`, `Services/AppConfig` (data folder, update settings)
-- `Views/PropertiesWindow` — item properties
+- `Services/GlobalHotkeys`, `Services/HotkeyGesture` — shortcuts that work from anywhere (`RegisterHotKey`)
+- `Services/ItemSearch`, `Services/LiveFolder` — search across sub-folders, live folders read from the disk
+- `Views/PropertiesWindow`, `Views/SettingsWindow` — item properties, settings

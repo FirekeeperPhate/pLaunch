@@ -45,8 +45,18 @@ public partial class PropertiesWindow : Window
         SetVisible(targetRow, TargetLabel, TargetBox);
         SetVisible(file || folder, BrowseTargetButton);
         TargetBox.IsReadOnly = item.Kind == ItemKind.Shell; // shell:AppsFolder names are not typed by hand
-        SetVisible(file, ArgumentsLabel, ArgumentsBox, StartInLabel, StartInBox, BrowseStartInButton);
+        SetVisible(file, ArgumentsLabel, ArgumentsBox, StartInLabel, StartInBox, BrowseStartInButton, StartWindowLabel, StartWindowBox);
         SetVisible(Launcher.CanRunAsAdmin(item), RunAsAdminBox);
+        SetVisible(item.IsLaunchable, HotkeyLabel, HotkeyPanel);
+        SetVisible(folder, ShowContentsBox);
+        StartWindowBox.SelectedIndex = (int)item.StartWindow;
+        ShowContentsBox.IsChecked = item.ShowContents;
+        HotkeyBox.Gesture = item.Hotkey;
+        HotkeyWinBox.IsChecked = HotkeyBox.UseWin;
+        UsageText.Text = item.LaunchCount == 0 ? ""
+            : $"Opened {item.LaunchCount} time{(item.LaunchCount == 1 ? "" : "s")}"
+              + (item.LastLaunched is { } last ? $", last on {last.ToLocalTime():g}." : ".");
+        UsageText.Visibility = item.LaunchCount == 0 ? Visibility.Collapsed : Visibility.Visible;
         IconGlyph.Text = item.Kind switch { ItemKind.Url => "\xE774", ItemKind.Folder or ItemKind.Group => "\xE8B7", _ => "\xE8A5" };
 
         Loaded += (_, _) =>
@@ -183,8 +193,14 @@ public partial class PropertiesWindow : Window
         _item.RunAsAdmin = RunAsAdminBox.Visibility == Visibility.Visible && RunAsAdminBox.IsChecked == true && Launcher.CanRunAsAdmin(_item);
         _item.IconPath = _iconPath;
         _item.IconIndex = _iconPath == null ? 0 : _iconIndex;
+        _item.StartWindow = kind == ItemKind.File ? (StartWindow)Math.Max(0, StartWindowBox.SelectedIndex) : StartWindow.Normal;
+        _item.ShowContents = kind == ItemKind.Folder && ShowContentsBox.IsChecked == true;
+        // Checked against the other programs when saved: the list tells if it is taken
+        _item.Hotkey = _item.IsLaunchable ? HotkeyBox.Gesture : null;
         DialogResult = true;
     }
+
+    void HotkeyWinBox_Click(object sender, RoutedEventArgs e) => HotkeyBox.UseWin = HotkeyWinBox.IsChecked == true;
 
     void Warn(string message) => MessageBox.Show(this, message, "pLaunch", MessageBoxButton.OK, MessageBoxImage.Warning);
 }

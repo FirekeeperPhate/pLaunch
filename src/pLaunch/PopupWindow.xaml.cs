@@ -88,12 +88,17 @@ public partial class PopupWindow : Window
         StateChanged += OnStateChanged;
         Deactivated += OnDeactivated;
         PreviewKeyDown += OnPreviewKeyDown;
+        PreviewTextInput += OnPreviewTextInput;
         DragEnter += OnDragEnter;
         DragOver += OnDragOver;
         DragLeave += (_, _) => _dragLeaveTimer.Start();
         Drop += OnDrop;
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
-        Closed += (_, _) => SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        Closed += (_, _) =>
+        {
+            SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            _hotkeys?.Dispose();
+        };
         List.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(OnListScrolled));
 
         ApplyView();
@@ -110,7 +115,11 @@ public partial class PopupWindow : Window
     /// <summary>False only in UI test harnesses, so an opened popup never takes the focus from the user.</summary>
     internal bool ActivateOnOpen { get; set; } = true;
 
-    List<LaunchItem> CurrentLevel => _path.Count == 0 ? _root : (_path[^1].Children ??= []);
+    /// <summary>The level shown: the top, a sub-folder, or the (read-only) content of a live folder.</summary>
+    List<LaunchItem> CurrentLevel =>
+        _path.Count == 0 ? _root
+        : _path[^1].Kind == ItemKind.Group ? (_path[^1].Children ??= [])
+        : LiveEntries(_path[^1]);
 
     // ---------------------------------------------------------------- open / close
 
@@ -170,13 +179,14 @@ public partial class PopupWindow : Window
                 CommitRename();
                 ClearDropMarkers();
                 SetSpringTarget(null);
-                // Back to the top level while hidden: the next opening starts there, like a menu, and items
-                // forwarded meanwhile ("Send to", command line) do not land in a sub-folder nobody sees
-                if (_path.Count > 0)
-                {
-                    _path.Clear();
+                // Back to the top level (and no search) while hidden: the next opening starts there, like a
+                // menu, and items forwarded meanwhile ("Send to", command line) do not land in a sub-folder
+                // nobody sees
+                bool reset = _path.Count > 0 || IsSearching;
+                _path.Clear();
+                ClearSearchText();
+                if (reset)
                     Refresh();
-                }
                 break;
         }
     }
@@ -290,6 +300,8 @@ public partial class PopupWindow : Window
         _acrylic = NativeMethods.SetDwmInt(_hwnd, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, NativeMethods.DWMSBT_TRANSIENTWINDOW) == 0;
         ApplyAppearance();
         ApplyListIdentity();
+        _hotkeys = new GlobalHotkeys(_hwnd);
+        RegisterHotkeys(force: true);
     }
 
     /// <summary>
@@ -347,6 +359,11 @@ public partial class PopupWindow : Window
     IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         // Win+Up or a double click on the taskbar thumbnail must not maximize the flyout
+        if (_hotkeys?.HandleMessage(msg, wParam) == true)
+        {
+            handled = true;
+            return IntPtr.Zero;
+        }
         if (msg == NativeMethods.WM_SYSCOMMAND && ((int)wParam & 0xFFF0) == NativeMethods.SC_MAXIMIZE)
             handled = true;
         return IntPtr.Zero;
@@ -392,7 +409,26 @@ public partial class PopupWindow : Window
     void Refresh(string? selectId = null)
     {
         selectId ??= (List.SelectedItem as ItemViewModel)?.Model.Id;
-        var target = ItemTree.DisplayOrder(CurrentLevel, _settings.Sort).Select(ViewModelFor).ToList();
+        List<ItemViewModel> target;
+        if (IsSearching)
+        {
+            // Results from every sub-folder, best first; the tooltip tells where each one lives
+            target = [];
+            foreach (var (item, location) in ItemSearch.Find(_root, _search))
+            {
+                var vm = ViewModelFor(item);
+                vm.Location = location;
+                target.Add(vm);
+            }
+        }
+        else
+        {
+            // Live folders come sorted from the disk (folders first); saved levels follow the chosen order
+            var level = CurrentLevel;
+            target = (InLiveFolder ? level : ItemTree.DisplayOrder(level, _settings.Sort)).Select(ViewModelFor).ToList();
+            foreach (var vm in target)
+                vm.Location = null;
+        }
         for (int i = 0; i < target.Count; i++)
         {
             var vm = target[i];
@@ -411,12 +447,16 @@ public partial class PopupWindow : Window
         while (_items.Count > target.Count)
             _items.RemoveAt(_items.Count - 1);
 
-        Header.Visibility = _path.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        HeaderTitle.Text = string.Join(" \x203A ", _path.Select(g => g.Name));
-        EmptyHintText.Text = _path.Count > 0
-            ? "This folder is empty. Drag shortcuts here."
+        Header.Visibility = _path.Count > 0 && !IsSearching ? Visibility.Visible : Visibility.Collapsed;
+        SearchBar.Visibility = IsSearching || SearchBox.IsKeyboardFocused ? Visibility.Visible : Visibility.Collapsed;
+        HeaderTitle.Text = string.Join(" \x203A ", _path.Select(g => g.Name))
+            + (InLiveFolder && _liveTruncated.Contains(_path[^1].Target) ? $"  (first {LiveFolder.MaxEntries})" : "");
+        EmptyHintText.Text = IsSearching ? $"Nothing matches “{_search}”."
+            : InLiveFolder ? LiveFolderHint()
+            : _path.Count > 0 ? "This folder is empty. Drag shortcuts here."
             : "Drag programs, files, folders or links here. You can also drop them on the pLaunch taskbar button.";
         UpdateEmptyHint();
+        AddButton.IsEnabled = !InLiveFolder; // the content of a live folder comes from the disk
 
         if (selectId != null && _items.FirstOrDefault(i => i.Model.Id == selectId) is { } selected)
         {
@@ -439,9 +479,18 @@ public partial class PopupWindow : Window
 
     // ---------------------------------------------------------------- sub-folders
 
+    /// <summary>Opens a sub-folder or a live folder inside the popup (from a search result: where it lives).</summary>
     void OpenGroup(LaunchItem group)
     {
         CommitRename();
+        if (IsSearching)
+        {
+            _path.Clear();
+            _path.AddRange(ItemTree.PathTo(_root, group.Id) ?? []);
+            ClearSearchText();
+        }
+        if (group.Kind == ItemKind.Folder)
+            _liveCache.Remove(group.Target); // read the disk again: the content may have changed
         _path.Add(group);
         Refresh();
         List.SelectedIndex = -1;
@@ -610,7 +659,8 @@ public partial class PopupWindow : Window
     /// <summary>The level above the shown sub-folder, and the position right after that sub-folder.</summary>
     (List<LaunchItem> Level, int Index)? ParentSlot()
     {
-        if (_path.Count == 0)
+        // Inside a live folder's own sub-folder the level above comes from the disk too: nothing to drop into
+        if (_path.Count == 0 || (_path.Count >= 2 && _path[^2].Kind != ItemKind.Group))
             return null;
         var parent = _path.Count >= 2 ? (_path[^2].Children ??= []) : _root;
         return (parent, parent.IndexOf(_path[^1]) + 1);
@@ -640,17 +690,44 @@ public partial class PopupWindow : Window
             ShowError("Cannot save the list.", ex.Message);
         }
         ScheduleJumpList();
+        RegisterHotkeys(); // only does something when a shortcut was added, changed or removed
     }
 
     void ScheduleJumpList() => _jumpList.Schedule(() => _root);
 
-    /// <summary>A click or Enter: sub-folders open, shortcuts launch, separators do nothing.</summary>
+    /// <summary>A click or Enter: sub-folders and live folders open inside, shortcuts launch, separators do nothing.</summary>
     void Open(ItemViewModel item, bool asAdmin = false)
     {
-        if (item.IsGroup)
+        if (item.IsNavigable)
             OpenGroup(item.Model);
         else if (!item.IsSeparator)
             Launch(item, asAdmin);
+    }
+
+    /// <summary>A launch counts for the "most used" order (saved items only: live folder entries are not kept).</summary>
+    void CountLaunches(IEnumerable<LaunchItem> launched, bool alreadyRecorded = false)
+    {
+        bool any = false;
+        foreach (var item in launched.Where(i => !i.IsLive))
+        {
+            if (!alreadyRecorded)
+                Launcher.RecordLaunch(item);
+            if (_viewModels.TryGetValue(item.Id, out var vm))
+                vm.RefreshToolTip();
+            any = true;
+        }
+        if (!any)
+            return;
+        Save();
+        if (_settings.Sort == SortMode.MostUsed)
+            Refresh();
+    }
+
+    /// <summary>"--launched id" from a jump list entry.</summary>
+    public void CountLaunch(string id)
+    {
+        if (ItemTree.Find(_root, id) is { } item)
+            CountLaunches([item]);
     }
 
     /// <summary>The selected items in display order (Ctrl/Shift+click select several).</summary>
@@ -665,6 +742,7 @@ public partial class PopupWindow : Window
                 MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)) != MessageBoxResult.Yes)
             return;
         var (started, errors) = Launcher.LaunchAll(items);
+        CountLaunches(items.Where(i => i.LastLaunched != null), alreadyRecorded: true);
         if (errors.Count > 0)
             ShowError(started > 0 ? $"{started} opened, {errors.Count} could not be opened:" : "Nothing could be opened:",
                 string.Join("\n", errors.Take(10)));
@@ -678,7 +756,7 @@ public partial class PopupWindow : Window
 
     void ShowProperties(ItemViewModel vm)
     {
-        if (vm.IsSeparator)
+        if (vm.IsSeparator || vm.Model.IsLive)
             return;
         CommitRename();
         var dialog = new Views.PropertiesWindow(vm.Model) { Owner = this };
@@ -688,7 +766,13 @@ public partial class PopupWindow : Window
         vm.Icon = null;          // target or icon changed: load again
         vm.IconPixels = 0;
         vm.IsMissing = Launcher.IsMissing(vm.Model);
-        Save();
+        Save(); // also registers a changed shortcut
+        if (vm.Model.Hotkey is { Length: > 0 } hotkey && _failedHotkeys.Contains(vm.Model.Id))
+        {
+            ShowError($"The shortcut {hotkey} cannot be used.", "Another program (or another list) already uses it. It was removed from the item.");
+            vm.Model.Hotkey = null;
+            Save();
+        }
         Refresh(vm.Model.Id);
     }
 
@@ -704,7 +788,10 @@ public partial class PopupWindow : Window
         {
             // Launch first: while pLaunch is still the foreground app the new window may take the focus
             if (Launcher.Launch(item.Model, asAdmin))
+            {
+                CountLaunches([item.Model]);
                 HidePopup();
+            }
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
@@ -890,10 +977,16 @@ public partial class PopupWindow : Window
         switch (e.Key)
         {
             case Key.Escape:
-                if (_path.Count > 0)
+                if (IsSearching)
+                    ClearSearch();
+                else if (_path.Count > 0)
                     GoBack();
                 else
                     HidePopup();
+                break;
+            case Key.F when Keyboard.Modifiers == ModifierKeys.Control: // Ctrl+F: the search box
+                SearchBar.Visibility = Visibility.Visible;
+                SearchBox.Focus();
                 break;
             case Key.Back when _path.Count > 0:
                 GoBack();
@@ -915,25 +1008,27 @@ public partial class PopupWindow : Window
                 Open(selected, asAdmin: Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift)
                                         && Launcher.CanRunAsAdmin(selected.Model));
                 break;
-            case Key.System when e.SystemKey == Key.Enter && selected is { IsSeparator: false }: // Alt+Enter
+            // Live folder entries come from the disk: they cannot be edited here
+            case Key.System when e.SystemKey == Key.Enter && selected is { IsSeparator: false } && !selected.Model.IsLive: // Alt+Enter
                 ShowProperties(selected);
                 break;
-            case Key.F2 when selected is { IsSeparator: false }:
+            case Key.F2 when selected is { IsSeparator: false } && !selected.Model.IsLive:
                 StartRename(selected);
                 break;
-            case Key.Delete when List.SelectedItems.Count > 1:
+            case Key.Delete when List.SelectedItems.Count > 1 && !InLiveFolder:
                 RemoveMany(SelectedItems());
                 break;
-            case Key.Delete when selected != null:
+            case Key.Delete when selected != null && !selected.Model.IsLive:
                 Remove(selected);
                 break;
-            case Key.V when Keyboard.Modifiers == ModifierKeys.Control:
+            case Key.V when Keyboard.Modifiers == ModifierKeys.Control && !InLiveFolder:
                 PasteFromClipboard();
                 break;
-            case >= Key.D1 and <= Key.D9 when Keyboard.Modifiers == ModifierKeys.None:
+            // 1-9 open the n-th item; while searching they are part of the search text
+            case >= Key.D1 and <= Key.D9 when Keyboard.Modifiers == ModifierKeys.None && !IsSearching:
                 OpenByNumber(e.Key - Key.D1);
                 break;
-            case >= Key.NumPad1 and <= Key.NumPad9 when Keyboard.Modifiers == ModifierKeys.None:
+            case >= Key.NumPad1 and <= Key.NumPad9 when Keyboard.Modifiers == ModifierKeys.None && !IsSearching:
                 OpenByNumber(e.Key - Key.NumPad1);
                 break;
             default:
@@ -1138,15 +1233,25 @@ public partial class PopupWindow : Window
             return;
         }
 
-        var open = CreateMenuItem("Open", () => Open(item), item.IsGroup ? "\xE838" : "\xE8A7");
+        var open = CreateMenuItem("Open", () => Open(item), item.IsNavigable ? "\xE838" : "\xE8A7");
         open.FontWeight = FontWeights.SemiBold;
         menu.Items.Add(open);
         if (item.IsGroup && (item.Model.Children ?? []).Count(c => c.IsLaunchable) is var count and > 0)
             menu.Items.Add(CreateMenuItem($"Open all ({count})", () => OpenAll(item.Model), "\xE8A7"));
+        // A live folder opens inside pLaunch on click: Explorer is one step away
+        if (item.Model.Kind == ItemKind.Folder && item.Model.ShowContents)
+            menu.Items.Add(CreateMenuItem("Open in File Explorer", () => Launch(item), "\xEC50"));
         if (Launcher.CanRunAsAdmin(item.Model))
             menu.Items.Add(CreateMenuItem("Run as administrator", () => Launch(item, asAdmin: true), "\xEA18", "Ctrl+Shift+Enter"));
         if (Launcher.HasLocation(item.Model))
             menu.Items.Add(CreateMenuItem("Open file location", () => OpenLocation(item), "\xE838"));
+        if (item.Model.IsLive)
+        {
+            // An entry of a live folder is not saved: it can only be copied into the list
+            menu.Items.Add(new Separator());
+            menu.Items.Add(CreateMenuItem("Add to pLaunch", () => AddLiveCopy(item.Model), "\xE710"));
+            return;
+        }
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem("Rename", () => StartRename(item), "\xE8AC", "F2"));
         menu.Items.Add(CreateMenuItem("Remove", () => Remove(item), "\xE74D", "Del"));
@@ -1182,52 +1287,52 @@ public partial class PopupWindow : Window
     {
         var menu = new ContextMenu { PlacementTarget = MenuButton, Placement = PlacementMode.Top };
 
+        // The quick ones stay here; everything else is in the Settings window
         var view = CreateSubmenu("View", "\xE8FD");
-        foreach (var (mode, label) in new[] { (ViewMode.List, "List"), (ViewMode.Grid, "Tiles"), (ViewMode.Icons, "Icons only") })
-            view.Items.Add(CreateChoice(label, _settings.View == mode, () => { _settings.View = mode; SettingsChanged(); }));
+        foreach (var (mode, label) in ViewChoices)
+            view.Items.Add(CreateChoice(label, _settings.View == mode, () => SetView(mode)));
         menu.Items.Add(view);
-
-        var size = CreateSubmenu("Size", "\xE740");
-        foreach (var (value, label) in new[] { (ItemSize.Small, "Small"), (ItemSize.Medium, "Medium"), (ItemSize.Large, "Large") })
-            size.Items.Add(CreateChoice(label, _settings.Size == value, () => { _settings.Size = value; SettingsChanged(); }));
-        menu.Items.Add(size);
-
         var sort = CreateSubmenu("Sort", "\xE8CB");
-        sort.Items.Add(CreateChoice("Custom (drag to arrange)", _settings.Sort == SortMode.Custom,
-            () => { _settings.Sort = SortMode.Custom; SettingsChanged(); }));
-        sort.Items.Add(CreateChoice("Alphabetical", _settings.Sort == SortMode.Alphabetical,
-            () => { _settings.Sort = SortMode.Alphabetical; SettingsChanged(); }));
+        foreach (var (mode, label) in SortChoices)
+            sort.Items.Add(CreateChoice(label, _settings.Sort == mode, () => SetSort(mode)));
         menu.Items.Add(sort);
-
-        var theme = CreateSubmenu("Theme", "\xE790");
-        foreach (var (value, label) in new[] { (ThemeChoice.System, "System"), (ThemeChoice.Light, "Light"), (ThemeChoice.Dark, "Dark") })
-            theme.Items.Add(CreateChoice(label, _settings.Theme == value, () => { _settings.Theme = value; AppearanceChanged(); }));
-        if (_settings.Background != null)
-        {
-            // With a custom color the text follows the color: say so instead of offering a choice that does nothing
-            theme.Items.Add(new Separator());
-            theme.Items.Add(new MenuItem { Header = "With a custom background the text color\nfollows the background", IsEnabled = false });
-        }
-        menu.Items.Add(theme);
-        menu.Items.Add(CreateBackgroundMenu());
-        var webIcons = new MenuItem { Header = "Website icons", IsCheckable = true, IsChecked = _settings.WebIcons,
-            ToolTip = "Web links show the site's icon, fetched once from the site" };
-        webIcons.Click += (_, _) => SetWebIcons(webIcons.IsChecked);
-        menu.Items.Add(webIcons);
-
         menu.Items.Add(new Separator());
+        menu.Items.Add(CreateMenuItem("Settings\x2026", OpenSettings, "\xE713"));
         menu.Items.Add(CreateListsMenu());
-        menu.Items.Add(CreateDataMenu());
-        var autostart = new MenuItem { Header = "Start with Windows", IsCheckable = true, IsChecked = SafeAutostart() };
-        autostart.Click += (_, _) => SetAutostart(autostart.IsChecked);
-        menu.Items.Add(autostart);
-        menu.Items.Add(CreateUpdatesMenu());
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem("Exit", Close, "\xE711"));
         menu.IsOpen = true;
     }
 
-    void SetWebIcons(bool enabled)
+    internal static readonly (ViewMode Mode, string Label)[] ViewChoices =
+        [(ViewMode.List, "List"), (ViewMode.Grid, "Tiles"), (ViewMode.Icons, "Icons only")];
+    internal static readonly (ItemSize Size, string Label)[] SizeChoices =
+        [(ItemSize.Small, "Small"), (ItemSize.Medium, "Medium"), (ItemSize.Large, "Large")];
+    internal static readonly (SortMode Mode, string Label)[] SortChoices =
+        [(SortMode.Custom, "Custom (drag to arrange)"), (SortMode.Alphabetical, "Alphabetical"), (SortMode.MostUsed, "Most used")];
+    internal static readonly (ThemeChoice Theme, string Label)[] ThemeChoices =
+        [(ThemeChoice.System, "System"), (ThemeChoice.Light, "Light"), (ThemeChoice.Dark, "Dark")];
+
+    internal LauncherSettings Settings => _settings;
+    internal ListProfile Profile => _profile;
+    internal bool AcrylicAvailable => _acrylic;
+
+    internal void SetView(ViewMode mode) { _settings.View = mode; SettingsChanged(); }
+    internal void SetSize(ItemSize size) { _settings.Size = size; SettingsChanged(); }
+    internal void SetSort(SortMode mode) { _settings.Sort = mode; SettingsChanged(); }
+    internal void SetTheme(ThemeChoice theme) { _settings.Theme = theme; AppearanceChanged(); }
+    internal void SetBackground(string? color) { _settings.Background = color; AppearanceChanged(); }
+    internal void SetTranslucent(bool translucent) { _settings.Translucent = translucent; AppearanceChanged(); }
+
+    void OpenSettings()
+    {
+        CommitRename();
+        var window = new Views.SettingsWindow(this) { Owner = this };
+        ShowModal(() => window.ShowDialog());
+        Activate();
+    }
+
+    internal void SetWebIcons(bool enabled)
     {
         _settings.WebIcons = enabled;
         IconProvider.WebIconsEnabled = enabled;
@@ -1239,71 +1344,6 @@ public partial class PopupWindow : Window
             vm.IconPixels = 0;
         }
         QueueIconLoad();
-    }
-
-    MenuItem CreateBackgroundMenu()
-    {
-        var background = CreateSubmenu("Background", "\xE771");
-        background.Items.Add(CreateChoice("Acrylic (Windows)", _settings.Background == null,
-            () => { _settings.Background = null; AppearanceChanged(); }));
-        background.Items.Add(new Separator());
-        bool isPreset = false;
-        foreach (var (name, hex) in Appearance.Presets)
-        {
-            bool current = string.Equals(_settings.Background, hex, StringComparison.OrdinalIgnoreCase);
-            isPreset |= current;
-            background.Items.Add(CreateChoice(SwatchHeader(hex, name), current,
-                () => { _settings.Background = hex; AppearanceChanged(); }));
-        }
-        background.Items.Add(new Separator());
-        // A color picked in the dialog shows its swatch here, checked
-        object customHeader = _settings.Background != null && !isPreset
-            ? SwatchHeader(_settings.Background, "Custom color\x2026")
-            : "Custom color\x2026";
-        var custom = new MenuItem { Header = customHeader, IsChecked = _settings.Background != null && !isPreset };
-        custom.Click += (_, _) => PickBackground();
-        background.Items.Add(custom);
-        background.Items.Add(new Separator());
-        var translucent = new MenuItem
-        {
-            Header = "Translucent",
-            IsCheckable = true,
-            IsChecked = _settings.Translucent,
-            IsEnabled = _settings.Background != null && _acrylic,
-        };
-        translucent.Click += (_, _) => { _settings.Translucent = translucent.IsChecked; AppearanceChanged(); };
-        background.Items.Add(translucent);
-        return background;
-    }
-
-    static StackPanel SwatchHeader(string hex, string name)
-    {
-        Appearance.TryParse(hex, out var color);
-        var swatch = new Border
-        {
-            Width = 16,
-            Height = 16,
-            CornerRadius = new CornerRadius(4),
-            BorderThickness = new Thickness(1),
-            Background = new SolidColorBrush(color),
-            Margin = new Thickness(0, 0, 10, 0),
-        };
-        swatch.SetResourceReference(Border.BorderBrushProperty, "ControlStrokeColorDefaultBrush");
-        var panel = new StackPanel { Orientation = Orientation.Horizontal };
-        panel.Children.Add(swatch);
-        panel.Children.Add(new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center });
-        return panel;
-    }
-
-    void PickBackground()
-    {
-        var start = Appearance.TryParse(_settings.Background, out var current) ? current : Color.FromRgb(0x2B, 0x34, 0x40);
-        if (ShowModal(() => NativeMethods.PickColor(_hwnd, start)) is { } picked)
-        {
-            _settings.Background = Appearance.ToHex(picked);
-            AppearanceChanged();
-        }
-        Activate(); // the dialog took the focus: without it the popup would not hide on the next click outside
     }
 
     void AppearanceChanged()
@@ -1406,7 +1446,7 @@ public partial class PopupWindow : Window
 
     void OnDragEnter(object sender, DragEventArgs e)
     {
-        _dragAcceptable = IsAcceptable(e.Data);
+        _dragAcceptable = !InLiveFolder && IsAcceptable(e.Data); // a live folder shows the disk: nothing is dropped into it
         OnDragOver(sender, e);
     }
 
@@ -1443,15 +1483,16 @@ public partial class PopupWindow : Window
         SetSpringTarget(null);
         var (index, into) = HitTest(e.GetPosition(List));
 
-        if (IsOwnDrag(e.Data) && e.Data.GetData(InternalDragFormat) is string id)
+        // Search results are not a level: a drop there only goes into a sub-folder, or at the end
+        if (IsSearching)
+            index = -1;
+        // A saved item of this list moves; a live folder entry (not saved) is added like any file
+        if (IsOwnDrag(e.Data) && e.Data.GetData(InternalDragFormat) is string id && ItemTree.Find(_root, id) is { } item)
         {
-            if (ItemTree.Find(_root, id) is { } item)
-            {
-                if (into != null)
-                    MoveInto(item, into.Model);
-                else
-                    MoveTo(item, index);
-            }
+            if (into != null)
+                MoveInto(item, into.Model);
+            else if (!IsSearching)
+                MoveTo(item, index);
             return;
         }
 
@@ -1592,7 +1633,7 @@ public partial class PopupWindow : Window
         _dragLeaveTimer.Stop();
         ClearDropMarkers();
         if (e.RoutedEvent == DragEnterEvent)
-            _dragAcceptable = IsAcceptable(e.Data);
+            _dragAcceptable = ParentSlot() != null && IsAcceptable(e.Data);
         if (!_dragAcceptable)
         {
             e.Effects = DragDropEffects.None;
@@ -1614,10 +1655,9 @@ public partial class PopupWindow : Window
         e.Handled = true;
         ResetHeaderHighlight();
         SetSpringTarget(null);
-        if (IsOwnDrag(e.Data) && e.Data.GetData(InternalDragFormat) is string id)
+        if (IsOwnDrag(e.Data) && e.Data.GetData(InternalDragFormat) is string id && ItemTree.Find(_root, id) is { } item)
         {
-            if (ItemTree.Find(_root, id) is { } item)
-                MoveToParent(item);
+            MoveToParent(item);
             return;
         }
         try
@@ -1649,13 +1689,13 @@ public partial class PopupWindow : Window
     void ShowError(string message, string detail) =>
         ShowModal(() => MessageBox.Show(this, $"{message}\n\n{detail}", "pLaunch", MessageBoxButton.OK, MessageBoxImage.Warning));
 
-    bool SafeAutostart()
+    internal bool SafeAutostart()
     {
         try { return Autostart.IsEnabled(_profile); }
         catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException) { return false; }
     }
 
-    void SetAutostart(bool enabled)
+    internal void SetAutostart(bool enabled)
     {
         try { Autostart.SetEnabled(_profile, enabled); }
         catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException)
@@ -1664,12 +1704,14 @@ public partial class PopupWindow : Window
         }
     }
 
-    void OpenDataFolder()
+    /// <param name="hide">False from the Settings window: minimizing the popup would take its dialog along.</param>
+    internal void OpenDataFolder(bool hide = true)
     {
         var folder = AppConfig.DataDirectoryPath;
         Directory.CreateDirectory(folder);
         Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true })?.Dispose();
-        HidePopup();
+        if (hide)
+            HidePopup();
     }
 
     void FocusSelected()

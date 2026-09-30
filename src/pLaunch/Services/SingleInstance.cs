@@ -17,6 +17,9 @@ public sealed class SingleInstance : IDisposable
     /// <summary>Sent by the list that moved the data folder: re-read app.json and reload the list.</summary>
     public const string ReloadCommand = "--reload-data";
 
+    /// <summary>"--launched &lt;id&gt;": a jump list entry launched this item (counted for "most used").</summary>
+    public const string LaunchedCommand = "--launched";
+
     readonly Mutex _mutex;
     readonly Mutex? _running;
     readonly string _pipeName;

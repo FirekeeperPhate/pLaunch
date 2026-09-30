@@ -27,19 +27,7 @@ public partial class PopupWindow
         _updateTimer.Start();
     }
 
-    MenuItem CreateUpdatesMenu()
-    {
-        var updates = CreateSubmenu("Updates", "\xE895");
-        updates.Items.Add(CreateMenuItem("Check now", async () => await CheckForUpdate(manual: true)));
-        var automatic = new MenuItem { Header = "Check automatically", IsCheckable = true, IsChecked = AppConfig.Load().CheckForUpdates };
-        automatic.Click += (_, _) => AppConfig.Update(c => c.CheckForUpdates = automatic.IsChecked);
-        updates.Items.Add(automatic);
-        updates.Items.Add(new Separator());
-        updates.Items.Add(new MenuItem { Header = $"pLaunch {UpdateService.CurrentVersion} ({UpdateService.Edition})", IsEnabled = false });
-        return updates;
-    }
-
-    async Task CheckForUpdate(bool manual)
+    internal async Task CheckForUpdate(bool manual)
     {
         var (status, info) = await UpdateService.CheckAsync();
         if (status == UpdateCheckStatus.Available && info != null)

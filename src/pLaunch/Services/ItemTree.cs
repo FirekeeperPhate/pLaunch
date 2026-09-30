@@ -30,13 +30,29 @@ public static class ItemTree
         return null;
     }
 
+    /// <summary>The sub-folders from the top level down to (not including) the item; null if it is not in the tree.</summary>
+    public static List<LaunchItem>? PathTo(IReadOnlyList<LaunchItem> items, string id)
+    {
+        foreach (var item in items)
+        {
+            if (item.Id == id)
+                return [];
+            if (item.Children != null && PathTo(item.Children, id) is { } below)
+            {
+                below.Insert(0, item);
+                return below;
+            }
+        }
+        return null;
+    }
+
     /// <summary>True when <paramref name="candidate"/> is <paramref name="group"/> itself or somewhere inside it.</summary>
     public static bool IsSelfOrInside(LaunchItem candidate, LaunchItem group) =>
         candidate == group || (group.Children?.Any(c => IsSelfOrInside(candidate, c)) ?? false);
 
     /// <summary>
-    /// The order shown in the popup. Custom = as stored. Alphabetical = each section between separators
-    /// sorted on its own, sub-folders first; the stored (custom) order is left untouched.
+    /// The order shown in the popup. Custom = as stored. Alphabetical / most used = each section between
+    /// separators sorted on its own, sub-folders first; the stored (custom) order is left untouched.
     /// </summary>
     public static List<LaunchItem> DisplayOrder(IReadOnlyList<LaunchItem> items, SortMode sort)
     {
@@ -46,9 +62,10 @@ public static class ItemTree
         var section = new List<LaunchItem>();
         void Flush()
         {
-            result.AddRange(section
-                .OrderBy(i => i.Kind == ItemKind.Group ? 0 : 1)
-                .ThenBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase));
+            var ordered = section.OrderBy(i => i.Kind == ItemKind.Group ? 0 : 1);
+            if (sort == SortMode.MostUsed)
+                ordered = ordered.ThenByDescending(i => i.LaunchCount).ThenByDescending(i => i.LastLaunched ?? DateTime.MinValue);
+            result.AddRange(ordered.ThenBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase));
             section.Clear();
         }
         foreach (var item in items)

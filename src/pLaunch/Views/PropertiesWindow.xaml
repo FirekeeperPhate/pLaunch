@@ -1,6 +1,7 @@
 <Window x:Class="pLaunch.Views.PropertiesWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:pLaunch.Controls"
         Title="Properties"
         Width="480"
         SizeToContent="Height"
@@ -45,6 +46,10 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.Resources>
                 <Style TargetType="TextBlock" x:Key="FieldLabel">
@@ -73,8 +78,29 @@
             <Button x:Name="BrowseStartInButton" Grid.Row="3" Grid.Column="2" Margin="8,0,0,8" Content="&#x2026;"
                     ToolTip="Browse" Click="BrowseStartIn_Click" />
 
-            <CheckBox x:Name="RunAsAdminBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
+            <TextBlock x:Name="StartWindowLabel" Grid.Row="4" Text="Window" Style="{StaticResource FieldLabel}" />
+            <ComboBox x:Name="StartWindowBox" Grid.Row="4" Grid.Column="1" Margin="0,0,0,8" MinWidth="180"
+                      HorizontalAlignment="Left" ToolTip="How the program's window opens (some programs ignore it)">
+                <ComboBoxItem Content="Normal" />
+                <ComboBoxItem Content="Minimized" />
+                <ComboBoxItem Content="Maximized" />
+            </ComboBox>
+
+            <TextBlock x:Name="HotkeyLabel" Grid.Row="5" Text="Shortcut" Style="{StaticResource FieldLabel}" />
+            <DockPanel x:Name="HotkeyPanel" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
+                       ToolTip="Opens the item from anywhere, without opening pLaunch">
+                <CheckBox x:Name="HotkeyWinBox" DockPanel.Dock="Left" Margin="0,0,10,0" VerticalAlignment="Center" Content="Win +" Click="HotkeyWinBox_Click" />
+                <controls:HotkeyBox x:Name="HotkeyBox" />
+            </DockPanel>
+
+            <CheckBox x:Name="ShowContentsBox" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
+                      Content="Show the folder's content inside pLaunch (a click opens it here)" />
+
+            <CheckBox x:Name="RunAsAdminBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
                       Content="Always run as administrator" />
+
+            <TextBlock x:Name="UsageText" Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0" FontSize="12"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
         </Grid>
 
         <StackPanel Grid.Row="2" Margin="0,20,0,0" Orientation="Horizontal" HorizontalAlignment="Right">

@@ -13,20 +13,7 @@ public partial class PopupWindow
     FileSystemWatcher? _storeWatcher;
     DispatcherTimer? _reloadTimer;
 
-    MenuItem CreateDataMenu()
-    {
-        var data = CreateSubmenu("Backup and sync", "\xE8F7");
-        data.Items.Add(CreateMenuItem("Export this list\x2026", ExportList, "\xE898"));
-        data.Items.Add(CreateMenuItem("Import a list\x2026", ImportList, "\xE896"));
-        data.Items.Add(new Separator());
-        var move = CreateMenuItem("Move data folder\x2026", MoveDataFolder, "\xE8DE");
-        move.ToolTip = "E.g. a OneDrive folder, to share the lists between PCs";
-        data.Items.Add(move);
-        data.Items.Add(CreateMenuItem("Open data folder", OpenDataFolder, "\xE838"));
-        return data;
-    }
-
-    void ExportList()
+    internal void ExportList()
     {
         var name = _profile.IsDefault ? "pLaunch" : $"pLaunch-{_profile.Name}";
         var dialog = new SaveFileDialog
@@ -48,7 +35,7 @@ public partial class PopupWindow
         }
     }
 
-    void ImportList()
+    internal void ImportList()
     {
         var dialog = new OpenFileDialog { Title = "Import list", Filter = "pLaunch list|*.json|All files|*.*" };
         if (ShowModal(() => dialog.ShowDialog(this)) != true)
@@ -102,7 +89,7 @@ public partial class PopupWindow
     /// Moves every list (items.json and lists\*.json) to another folder, or starts using the lists already
     /// there, then tells the other running lists to reload from it.
     /// </summary>
-    void MoveDataFolder()
+    internal void MoveDataFolder()
     {
         var current = AppConfig.DataDirectoryPath;
         var dialog = new OpenFolderDialog { Title = "Folder for the pLaunch lists", InitialDirectory = current };
@@ -189,12 +176,14 @@ public partial class PopupWindow
         _settings = data.Settings;
         IconProvider.WebIconsEnabled = _settings.WebIcons;
         _path.Clear();
+        ClearSearchText();
         List.SelectedItems.Clear();
         ApplyView();
         ApplyAppearance();
         ApplyListIdentity();
         ScheduleJumpList();
         WatchStoreFile();
+        RegisterHotkeys(); // the shortcuts may be different in the file that came in
     }
 
     /// <summary>

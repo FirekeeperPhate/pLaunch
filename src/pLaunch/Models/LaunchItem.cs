@@ -15,6 +15,8 @@ public enum ItemKind
     Group,
 }
 
+public enum StartWindow { Normal, Minimized, Maximized }
+
 public sealed class LaunchItem
 {
     /// <summary>A new item: a fresh random id.</summary>
@@ -42,10 +44,29 @@ public sealed class LaunchItem
     /// </summary>
     public string? IconPath { get; set; }
     public int IconIndex { get; set; }
+    /// <summary>A folder of the disk that opens inside pLaunch, showing its current content ("live folder").</summary>
+    public bool ShowContents { get; set; }
+    /// <summary>How the program's window starts (programs may ignore it).</summary>
+    public StartWindow StartWindow { get; set; }
+    /// <summary>Global shortcut that launches the item without opening the popup ("Ctrl+Alt+E"); null = none.</summary>
+    public string? Hotkey { get; set; }
+    /// <summary>How often it was launched, for the "most used" order.</summary>
+    public int LaunchCount { get; set; }
+    public DateTime? LastLaunched { get; set; }
     /// <summary>The content of a <see cref="ItemKind.Group"/>, in custom order.</summary>
     public List<LaunchItem>? Children { get; set; }
 
+    /// <summary>
+    /// An entry of a live folder: made on the fly from the disk, never saved (its id is "live:" + path, so
+    /// the view keeps its icon across refreshes).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsLive { get; init; }
+
     public bool IsLaunchable => Kind is not (ItemKind.Separator or ItemKind.Group);
+
+    /// <summary>Opens inside the popup: sub-folders of pLaunch and live folders.</summary>
+    public bool IsNavigable => Kind == ItemKind.Group || (Kind == ItemKind.Folder && ShowContents);
 
     /// <summary>Whether an icon is shown for it: launchable items, and sub-folders with a custom icon.</summary>
     public bool HasShellIcon => IsLaunchable || (Kind == ItemKind.Group && !string.IsNullOrWhiteSpace(IconPath));

@@ -52,14 +52,37 @@ public static class Program
         }
     }
 
+    /// <summary>
+    /// A launch from the jump list counts for "most used": the running list counts it (it owns the file),
+    /// or, when the list is not running, this process writes the file itself.
+    /// </summary>
+    static void CountLaunch(ListProfile profile, ItemStore store, StoreData data, Models.LaunchItem item)
+    {
+        if (SingleInstance.SendTo(profile, [SingleInstance.LaunchedCommand, item.Id]))
+            return;
+        try
+        {
+            Launcher.RecordLaunch(item);
+            if (store.LoadError == null)
+                store.Save(data.Items, data.Settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Not counted: nothing else is lost
+        }
+    }
+
     static int LaunchById(ListProfile profile, string id)
     {
-        var item = ItemTree.Find(ItemStore.For(profile).Load().Items, id);
+        var store = ItemStore.For(profile);
+        var data = store.Load();
+        var item = ItemTree.Find(data.Items, id);
         if (item is not { IsLaunchable: true })
             return 1;
         try
         {
-            Launcher.Launch(item);
+            if (Launcher.Launch(item))
+                CountLaunch(profile, store, data, item);
             return 0;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)

@@ -79,7 +79,21 @@ public static class Launcher
             psi.WorkingDirectory = Path.GetDirectoryName(item.Target) ?? "";
         if (asAdmin || (item.RunAsAdmin && CanRunAsAdmin(item)))
             psi.Verb = "runas";
+        // Passed to the program as its first show command; some programs ignore it
+        psi.WindowStyle = item.StartWindow switch
+        {
+            StartWindow.Minimized => ProcessWindowStyle.Minimized,
+            StartWindow.Maximized => ProcessWindowStyle.Maximized,
+            _ => ProcessWindowStyle.Normal,
+        };
         return psi;
+    }
+
+    /// <summary>Counts a launch, for the "most used" order.</summary>
+    public static void RecordLaunch(LaunchItem item)
+    {
+        item.LaunchCount++;
+        item.LastLaunched = DateTime.UtcNow;
     }
 
     /// <summary>
@@ -100,7 +114,10 @@ public static class Launcher
             try
             {
                 if (Launch(item))
+                {
+                    RecordLaunch(item);
                     started++;
+                }
             }
             catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
             {

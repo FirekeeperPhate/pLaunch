@@ -22,6 +22,17 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
 
     public bool IsGroup => Model.Kind == ItemKind.Group;
     public bool IsSeparator => Model.Kind == ItemKind.Separator;
+    /// <summary>Opens inside the popup (sub-folder or live folder): rows show a chevron.</summary>
+    public bool IsNavigable => Model.IsNavigable;
+
+    string? _location;
+
+    /// <summary>In search results: the sub-folder the item is in ("Work › Tools"), shown in the tooltip.</summary>
+    public string? Location
+    {
+        get => _location;
+        set { if (Set(ref _location, value)) OnPropertyChanged(nameof(ToolTip)); }
+    }
 
     public string Name
     {
@@ -40,23 +51,39 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
     /// <summary>After the model was edited in place (Properties): everything derived from it changed.</summary>
     public void NotifyModelChanged()
     {
-        foreach (var name in new[] { nameof(Name), nameof(ToolTip), nameof(Glyph), nameof(ChildInfo) })
+        foreach (var name in new[] { nameof(Name), nameof(ToolTip), nameof(Glyph), nameof(ChildInfo), nameof(IsNavigable) })
             OnPropertyChanged(name);
     }
 
-    public string ToolTip => Model.Kind switch
+    public string ToolTip
     {
-        ItemKind.Group => $"{Model.Name} ({ChildInfo})",
-        ItemKind.Separator => "",
-        _ => $"{Model.Name}\n{(Model.Arguments is { Length: > 0 } args ? $"{Model.Target} {args}" : Model.Target)}",
-    };
+        get
+        {
+            var text = Model.Kind switch
+            {
+                ItemKind.Group => $"{Model.Name} ({ChildInfo})",
+                ItemKind.Separator => "",
+                _ => $"{Model.Name}\n{(Model.Arguments is { Length: > 0 } args ? $"{Model.Target} {args}" : Model.Target)}",
+            };
+            if (Model.Hotkey is { Length: > 0 } hotkey)
+                text += $"\nShortcut: {hotkey}";
+            if (Model.LaunchCount > 0)
+                text += $"\nOpened {Model.LaunchCount} time{(Model.LaunchCount == 1 ? "" : "s")}";
+            return _location is { Length: > 0 } location ? $"{text}\nIn: {location}" : text;
+        }
+    }
+
+    /// <summary>After a launch was counted: the tooltip shows the count.</summary>
+    public void RefreshToolTip() => OnPropertyChanged(nameof(ToolTip));
 
     /// <summary>Shortcuts inside a sub-folder (its own sub-folders included), shown next to its name.</summary>
     public string ChildInfo
     {
         get
         {
-            int n = IsGroup ? ItemTree.CountLaunchables(Model) : 0;
+            if (!IsGroup)
+                return ""; // a live folder: its content is only known once opened
+            int n = ItemTree.CountLaunchables(Model);
             return n == 1 ? "1 item" : $"{n} items";
         }
     }
