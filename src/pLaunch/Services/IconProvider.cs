@@ -16,11 +16,53 @@ public static class IconProvider
     static readonly IconWorker Local = new("pLaunch icons");
     static readonly IconWorker Network = new("pLaunch network icons");
 
-    /// <summary>The icon, frozen (usable from any thread), or null when the shell has none (yet).</summary>
-    public static Task<ImageSource?> GetAsync(LaunchItem item, int pixelSize)
+    /// <summary>Web links show the site's icon (see <see cref="FaviconService"/>); off = the browser's icon.</summary>
+    public static bool WebIconsEnabled { get; set; } = true;
+
+    static readonly HashSet<string> IconResourceFiles = new(StringComparer.OrdinalIgnoreCase)
     {
-        var worker = item.Kind is ItemKind.File or ItemKind.Folder && Launcher.IsNetworkPath(item.Target) ? Network : Local;
-        return worker.Enqueue(item.Kind == ItemKind.Url ? null : item.Target, pixelSize);
+        ".exe", ".dll", ".icl", ".cpl", ".ocx", ".scr", ".mun",
+    };
+
+    /// <summary>The icon, frozen (usable from any thread), or null when there is none (yet).</summary>
+    public static async Task<ImageSource?> GetAsync(LaunchItem item, int pixelSize)
+    {
+        // A custom icon wins, for any kind (sub-folders included)
+        if (!string.IsNullOrWhiteSpace(item.IconPath))
+        {
+            var path = Environment.ExpandEnvironmentVariables(item.IconPath);
+            var worker = Launcher.IsNetworkPath(path) ? Network : Local;
+            return await worker.Enqueue($"{path}|{item.IconIndex}", pixelSize, () => LoadCustom(path, item.IconIndex, pixelSize));
+        }
+        if (item.Kind == ItemKind.Url && WebIconsEnabled && Uri.TryCreate(item.Target, UriKind.Absolute, out var uri)
+            && await FaviconService.GetAsync(uri) is { } favicon)
+            return favicon;
+        if (item.Kind == ItemKind.Url)
+            return await Local.EnqueueBrowserIcon(pixelSize);
+        var target = item.Target;
+        var targetWorker = item.Kind is ItemKind.File or ItemKind.Folder && Launcher.IsNetworkPath(target) ? Network : Local;
+        return await targetWorker.Enqueue(target, pixelSize, () => Load(target, pixelSize, NativeMethods.SIIGBF.IconOnly));
+    }
+
+    /// <summary>An icon picked by the user: a resource of an .exe/.dll, or an image/.ico file shown as it is.</summary>
+    static BitmapSource? LoadCustom(string path, int index, int size)
+    {
+        if (!IconResourceFiles.Contains(Path.GetExtension(path)))
+            return Load(path, size, NativeMethods.SIIGBF.ResizeToFit);
+        var icon = ShellInterop.ExtractIcon(path, index, size);
+        if (icon == IntPtr.Zero)
+            return null;
+        try
+        {
+            var bitmap = System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(
+                icon, System.Windows.Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            bitmap.Freeze();
+            return bitmap;
+        }
+        finally
+        {
+            ShellInterop.DestroyIcon(icon);
+        }
     }
 
     public static void ClearCache()
@@ -49,26 +91,21 @@ public static class IconProvider
             thread.Start();
         }
 
-        /// <summary><paramref name="target"/> null = a web link, shown with the default browser's icon.</summary>
-        public Task<ImageSource?> Enqueue(string? target, int size)
+        /// <summary>Runs <paramref name="load"/> on the worker, cached by <paramref name="key"/> and size.</summary>
+        public Task<ImageSource?> Enqueue(string key, int size, Func<ImageSource?> load)
         {
             var result = new TaskCompletionSource<ImageSource?>(TaskCreationOptions.RunContinuationsAsynchronously);
             _queue.Add(() =>
             {
                 try
                 {
-                    var source = target ?? (_browserPath ??= NativeMethods.GetAssociatedExecutable("https") ?? "");
-                    if (source.Length == 0)
-                    {
-                        result.SetResult(null);
-                        return;
-                    }
-                    var key = (source.ToUpperInvariant(), size);
-                    if (!_cache.TryGetValue(key, out var image) && Load(source, size) is { } loaded)
-                        _cache[key] = image = loaded;
+                    var cacheKey = (key.ToUpperInvariant(), size);
+                    if (!_cache.TryGetValue(cacheKey, out var image) && load() is { } loaded)
+                        _cache[cacheKey] = image = loaded;
                     result.SetResult(image);
                 }
-                catch (Exception ex) when (ex is COMException or ArgumentException or InvalidOperationException)
+                catch (Exception ex) when (ex is COMException or ArgumentException or InvalidOperationException
+                                               or IOException or NotSupportedException or FileFormatException)
                 {
                     result.SetResult(null);
                 }
@@ -76,17 +113,27 @@ public static class IconProvider
             return result.Task;
         }
 
+        /// <summary>The default browser's icon, standing for web links without a site icon.</summary>
+        public Task<ImageSource?> EnqueueBrowserIcon(int size)
+        {
+            _browserPath ??= NativeMethods.GetAssociatedExecutable("https") ?? "";
+            var browser = _browserPath;
+            return browser.Length == 0
+                ? Task.FromResult<ImageSource?>(null)
+                : Enqueue(browser, size, () => Load(browser, size, NativeMethods.SIIGBF.IconOnly));
+        }
+
         public void ClearCache() => _queue.Add(_cache.Clear);
     }
 
-    static BitmapSource? Load(string parsingName, int size)
+    static BitmapSource? Load(string parsingName, int size, NativeMethods.SIIGBF flags)
     {
         var iid = NativeMethods.IID_IShellItemImageFactory;
         if (NativeMethods.SHCreateItemFromParsingName(parsingName, IntPtr.Zero, ref iid, out var factory) != 0 || factory == null)
             return null;
         try
         {
-            var hr = factory.GetImage(new NativeMethods.SIZE { cx = size, cy = size }, NativeMethods.SIIGBF.IconOnly, out var hbmp);
+            var hr = factory.GetImage(new NativeMethods.SIZE { cx = size, cy = size }, flags, out var hbmp);
             if (hr != 0 || hbmp == IntPtr.Zero)
                 return null;
             try { return FromHBitmap(hbmp); }

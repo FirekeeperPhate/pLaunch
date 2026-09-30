@@ -1,18 +1,21 @@
 using System.IO.Pipes;
-using System.Security.Principal;
 using System.Text;
 using pLaunch.Native;
 
 namespace pLaunch.Services;
 
 /// <summary>
-/// One pLaunch per user session. A second start forwards its request to the running instance
-/// through a named pipe: nothing (open the popup) or the paths/URLs to add.
+/// One pLaunch per list and user session. A second start forwards its request to the running instance
+/// through a named pipe: nothing (open the popup), the paths/URLs to add, or a command such as
+/// <see cref="ReloadCommand"/>.
 /// </summary>
 public sealed class SingleInstance : IDisposable
 {
-    /// <summary>Held while pLaunch runs: the installer (AppMutex) asks to close it first.</summary>
-    const string RunningMutexName = "pLaunch.Running";
+    /// <summary>Held while any pLaunch runs: the installer (AppMutex) asks to close it first.</summary>
+    public const string RunningMutexName = "pLaunch.Running";
+
+    /// <summary>Sent by the list that moved the data folder: re-read app.json and reload the list.</summary>
+    public const string ReloadCommand = "--reload-data";
 
     readonly Mutex _mutex;
     readonly Mutex? _running;
@@ -21,15 +24,20 @@ public sealed class SingleInstance : IDisposable
 
     public bool IsPrimary { get; }
 
-    public SingleInstance()
+    public SingleInstance(ListProfile profile)
     {
-        var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
-        _mutex = new Mutex(true, $@"Local\pLaunch-{sid}", out bool created);
+        _mutex = new Mutex(true, $@"Local\pLaunch-{ListProfile.UserKey}{profile.InstanceKey}", out bool created);
         IsPrimary = created;
         if (created)
             _running = new Mutex(false, RunningMutexName);
+        _pipeName = PipeName(profile);
+    }
+
+    // Pipes are machine-wide, the Local\ mutex is per session: the session is part of the name
+    static string PipeName(ListProfile profile)
+    {
         using var process = System.Diagnostics.Process.GetCurrentProcess();
-        _pipeName = $"pLaunch-{sid}-{process.SessionId}"; // pipes are machine-wide, the Local\ mutex is per session
+        return $"pLaunch-{ListProfile.UserKey}-{process.SessionId}{profile.InstanceKey}";
     }
 
     /// <summary>Sends the arguments to the running instance; an empty list just shows its popup.</summary>
@@ -37,10 +45,19 @@ public sealed class SingleInstance : IDisposable
     {
         // The primary is in the background: let it bring its popup to the front
         NativeMethods.AllowSetForegroundWindow(NativeMethods.ASFW_ANY);
+        return Send(_pipeName, arguments, 3000);
+    }
+
+    /// <summary>Sends a request to the running instance of another list; false when it is not running.</summary>
+    public static bool SendTo(ListProfile profile, IReadOnlyList<string> arguments, int timeoutMs = 500) =>
+        Send(PipeName(profile), arguments, timeoutMs);
+
+    static bool Send(string pipeName, IReadOnlyList<string> arguments, int timeoutMs)
+    {
         try
         {
-            using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.Out, PipeOptions.CurrentUserOnly);
-            client.Connect(3000);
+            using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.Out, PipeOptions.CurrentUserOnly);
+            client.Connect(timeoutMs);
             using var writer = new StreamWriter(client, new UTF8Encoding(false));
             writer.Write(string.Join("\n", arguments));
             return true;

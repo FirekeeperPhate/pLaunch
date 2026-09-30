@@ -117,11 +117,17 @@ public static class DropReader
                 try
                 {
                     var path = NativeMethods.GetNameFromIDList(absolute, NativeMethods.SIGDN.FileSysPath);
-                    var item = path != null
-                        ? ItemFactory.FromPath(path)
-                        : ItemFactory.FromShell(
-                            NativeMethods.GetNameFromIDList(absolute, NativeMethods.SIGDN.DesktopAbsoluteParsing) ?? "",
-                            NativeMethods.GetNameFromIDList(absolute, NativeMethods.SIGDN.NormalDisplay));
+                    var display = NativeMethods.GetNameFromIDList(absolute, NativeMethods.SIGDN.NormalDisplay);
+                    LaunchItem? item;
+                    if (path != null)
+                        item = ItemFactory.FromPath(path);
+                    else if (ItemFactory.IsAppsFolder(NativeMethods.GetParentParsingName(absolute)))
+                        // Start menu apps: their own parsing name is only the app id, the folder says where it lives
+                        item = ItemFactory.FromShell(
+                            "shell:AppsFolder\\" + NativeMethods.GetNameFromIDList(absolute, NativeMethods.SIGDN.ParentRelativeParsing), display);
+                    else
+                        item = ItemFactory.FromShell(
+                            NativeMethods.GetNameFromIDList(absolute, NativeMethods.SIGDN.DesktopAbsoluteParsing) ?? "", display);
                     if (item != null)
                         result.Add(item);
                 }

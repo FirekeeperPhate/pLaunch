@@ -43,6 +43,9 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int key);
 
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+
     // ---- Monitors and taskbar ----
 
     public const uint MONITOR_DEFAULTTONEAREST = 2;
@@ -134,6 +137,7 @@ internal static class NativeMethods
     public enum SIGDN : uint
     {
         NormalDisplay = 0x00000000,
+        ParentRelativeParsing = 0x80018001,
         DesktopAbsoluteParsing = 0x80028000,
         FileSysPath = 0x80058000,
     }
@@ -146,6 +150,29 @@ internal static class NativeMethods
 
     [DllImport("shell32.dll")]
     public static extern void ILFree(IntPtr pidl);
+
+    [DllImport("shell32.dll")]
+    public static extern IntPtr ILClone(IntPtr pidl);
+
+    [DllImport("shell32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ILRemoveLastID(IntPtr pidl);
+
+    /// <summary>The parsing name of the folder that holds the item (its id list minus the last id).</summary>
+    public static string? GetParentParsingName(IntPtr pidl)
+    {
+        var parent = ILClone(pidl);
+        if (parent == IntPtr.Zero)
+            return null;
+        try
+        {
+            return ILRemoveLastID(parent) ? GetNameFromIDList(parent, SIGDN.DesktopAbsoluteParsing) : null;
+        }
+        finally
+        {
+            ILFree(parent);
+        }
+    }
 
     public static string? GetNameFromIDList(IntPtr pidl, SIGDN sigdn)
     {

@@ -53,33 +53,61 @@ public static class Launcher
     {
         // Let the started app (or an already running one that receives the file/URL) take the foreground
         NativeMethods.AllowSetForegroundWindow(NativeMethods.ASFW_ANY);
-
-        ProcessStartInfo psi;
-        if (item.Kind == ItemKind.Shell)
-        {
-            // shell:AppsFolder\<AUMID> and ::{CLSID} names are resolved by Explorer
-            psi = new ProcessStartInfo("explorer.exe", Quote(item.Target));
-        }
-        else
-        {
-            psi = new ProcessStartInfo(item.Target) { UseShellExecute = true, Arguments = item.Arguments ?? "" };
-            // Start in the target's folder, like the old Quick Launch shortcuts: scripts (.bat, .cmd)
-            // and many programs use relative paths. A .lnk keeps its own "Start in" if it has one.
-            if (item.Kind == ItemKind.File)
-                psi.WorkingDirectory = Path.GetDirectoryName(item.Target) ?? "";
-            if (asAdmin)
-                psi.Verb = "runas";
-        }
-
         try
         {
-            Process.Start(psi)?.Dispose();
+            Process.Start(CreateStartInfo(item, asAdmin))?.Dispose();
             return true;
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == ErrorCancelled)
         {
             return false;
         }
+    }
+
+    internal static ProcessStartInfo CreateStartInfo(LaunchItem item, bool asAdmin = false)
+    {
+        // shell:AppsFolder\<AUMID> and ::{CLSID} names are resolved by Explorer
+        if (item.Kind == ItemKind.Shell)
+            return new ProcessStartInfo("explorer.exe", Quote(item.Target));
+
+        var psi = new ProcessStartInfo(item.Target) { UseShellExecute = true, Arguments = item.Arguments ?? "" };
+        if (item.WorkingDirectory is { Length: > 0 } folder)
+            psi.WorkingDirectory = Environment.ExpandEnvironmentVariables(folder);
+        else if (item.Kind == ItemKind.File)
+            // The target's folder, like the old Quick Launch shortcuts: scripts (.bat, .cmd) and many
+            // programs use relative paths. A .lnk keeps its own "Start in" if it has one.
+            psi.WorkingDirectory = Path.GetDirectoryName(item.Target) ?? "";
+        if (asAdmin || (item.RunAsAdmin && CanRunAsAdmin(item)))
+            psi.Verb = "runas";
+        return psi;
+    }
+
+    /// <summary>
+    /// Launches several items (a selection, or everything in a sub-folder). Returns how many started and
+    /// the errors of the others; an elevation prompt the user declined is not an error.
+    /// </summary>
+    public static (int Started, List<string> Errors) LaunchAll(IEnumerable<LaunchItem> items)
+    {
+        int started = 0;
+        var errors = new List<string>();
+        foreach (var item in items.Where(i => i.IsLaunchable))
+        {
+            if (IsMissing(item))
+            {
+                errors.Add($"{item.Name}: not found");
+                continue;
+            }
+            try
+            {
+                if (Launch(item))
+                    started++;
+            }
+            catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+            {
+                errors.Add($"{item.Name}: {ex.Message}");
+            }
+        }
+        return (started, errors);
     }
 
     public static void OpenLocation(LaunchItem item)

@@ -18,11 +18,14 @@ public sealed class JumpListBuilder
 
     readonly DispatcherTimer _timer;
     readonly ConcurrentDictionary<string, string> _iconCache = new(StringComparer.OrdinalIgnoreCase);
+    readonly ListProfile _profile;
     Func<IReadOnlyList<LaunchItem>>? _source; // the whole tree
     int _generation;
 
-    public JumpListBuilder()
+    /// <param name="profile">The list: its entries must start "pLaunch --list Name --launch id".</param>
+    public JumpListBuilder(ListProfile profile)
     {
+        _profile = profile;
         _timer = new DispatcherTimer { Interval = Delay };
         _timer.Tick += async (_, _) =>
         {
@@ -50,10 +53,13 @@ public sealed class JumpListBuilder
         int generation = ++_generation;
         // Copies: the items may be renamed or removed while the icons are looked up
         var items = ItemTree.Launchables(_source(), "Shortcuts")
-            .Select(e => (e.Item.Id, e.Item.Name, e.Item.Target, e.Item.Kind, e.Category)).ToList();
-        var icons = await Task.Run(() => items.Select(i => IconResourceFor(i.Kind, i.Target) ?? exe).ToList());
+            .Select(e => (e.Item.Id, e.Item.Name, e.Item.Target, e.Item.Kind, e.Category, e.Item.IconPath, e.Item.IconIndex)).ToList();
+        var icons = await Task.Run(() => items.Select(i =>
+            CustomIconResource(i.IconPath, i.IconIndex) ?? (IconResourceFor(i.Kind, i.Target) ?? exe, 0)).ToList());
         if (generation != _generation)
             return; // a newer update is on its way
+        if (Application.Current is null)
+            return; // shutting down while the icons were looked up
 
         var list = new JumpList { ShowRecentCategory = false, ShowFrequentCategory = false };
         for (int i = 0; i < items.Count; i++)
@@ -63,8 +69,9 @@ public sealed class JumpListBuilder
                 Title = items[i].Name,
                 Description = items[i].Target,
                 ApplicationPath = exe,
-                Arguments = "--launch " + items[i].Id,
-                IconResourcePath = icons[i],
+                Arguments = _profile.Arguments + "--launch " + items[i].Id,
+                IconResourcePath = icons[i].Path,
+                IconResourceIndex = icons[i].Index,
                 CustomCategory = items[i].Category,
             });
         }
@@ -77,6 +84,22 @@ public sealed class JumpListBuilder
         {
             // Explorer not ready yet (e.g. right after logon): the list is rebuilt on the next change
         }
+    }
+
+    /// <summary>
+    /// The item's custom icon when a jump list can show it: an icon resource of an .exe/.dll or an .ico
+    /// (not a .png). Null otherwise, and then the target's icon is used.
+    /// </summary>
+    static (string Path, int Index)? CustomIconResource(string? iconPath, int index)
+    {
+        if (string.IsNullOrWhiteSpace(iconPath))
+            return null;
+        var path = Environment.ExpandEnvironmentVariables(iconPath);
+        var ext = Path.GetExtension(path);
+        if (ext.Equals(".png", StringComparison.OrdinalIgnoreCase) || ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) || ext.Equals(".bmp", StringComparison.OrdinalIgnoreCase))
+            return null;
+        return (path, ext.Equals(".ico", StringComparison.OrdinalIgnoreCase) ? 0 : index);
     }
 
     /// <summary>A file whose first icon represents the item (jump lists take icon resources, not bitmaps).</summary>

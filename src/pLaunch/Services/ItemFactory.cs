@@ -12,7 +12,13 @@ public static class ItemFactory
     };
 
     // Prefix of the parsing names of Start menu apps (the AppsFolder CLSID)
-    const string AppsFolderParsingPrefix = "::{4234D49B-0245-4DF3-B780-3893943456E1}\\";
+    const string AppsFolderParsingName = "::{4234D49B-0245-4DF3-B780-3893943456E1}";
+    const string AppsFolderParsingPrefix = AppsFolderParsingName + "\\";
+
+    /// <summary>Whether a folder parsing name is the Applications folder (shell:AppsFolder) of the Start menu.</summary>
+    public static bool IsAppsFolder(string? parsingName) =>
+        string.Equals(parsingName, AppsFolderParsingName, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(parsingName, "shell:AppsFolder", StringComparison.OrdinalIgnoreCase);
 
     public static LaunchItem? FromPath(string path)
     {

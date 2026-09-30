@@ -1,0 +1,20 @@
+<Window x:Class="pLaunch.Views.TextPromptWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="pLaunch"
+        Width="400"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+    <StackPanel Margin="20">
+        <TextBlock x:Name="MessageText" TextWrapping="Wrap" />
+        <TextBox x:Name="InputBox" Margin="0,12,0,0" />
+        <TextBlock x:Name="ErrorText" Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed"
+                   Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+        <StackPanel Margin="0,20,0,0" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="OK" MinWidth="90" IsDefault="True" Style="{DynamicResource AccentButtonStyle}" Click="Ok_Click" />
+            <Button Margin="8,0,0,0" Content="Cancel" MinWidth="90" IsCancel="True" />
+        </StackPanel>
+    </StackPanel>
+</Window>

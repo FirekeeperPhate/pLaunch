@@ -181,13 +181,7 @@
                     <TextBlock x:Name="FallbackGlyph" Text="{Binding Glyph}" Style="{StaticResource Glyph}"
                                FontSize="{DynamicResource GlyphSize}" HorizontalAlignment="Center" />
                 </Grid>
-                <!-- No room for a name: renaming happens in a box below the tile -->
-                <Popup x:Name="RenamePopup" IsOpen="{Binding IsEditing, Mode=OneWay}" PlacementTarget="{Binding ElementName=Tile}"
-                       Placement="Bottom" AllowsTransparency="True">
-                    <TextBox x:Name="RenameBox" Width="200"
-                             Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
-                             KeyDown="RenameBox_KeyDown" LostKeyboardFocus="RenameBox_LostKeyboardFocus" />
-                </Popup>
+                <!-- No room for a name: renaming uses the window's RenameOverlay, placed below the tile -->
                 <Border Width="2" Margin="-3,4,0,4" HorizontalAlignment="Left" CornerRadius="1"
                         Background="{DynamicResource AccentFillColorDefaultBrush}"
                         Visibility="{Binding DropBefore, Converter={StaticResource BoolToVisibility}}" />
@@ -237,6 +231,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- Inside a sub-folder: back button and path. Dropping here moves up one level; holding a drag
@@ -254,7 +249,9 @@
                 </DockPanel>
             </Border>
 
+            <!-- Extended: Ctrl+click / Shift+click select several items, Enter opens them all -->
             <ListBox x:Name="List" Grid.Row="1" Margin="4,6,4,2" Background="Transparent" BorderThickness="0"
+                     SelectionMode="Extended"
                      IsTextSearchEnabled="True" TextSearch.TextPath="Name"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      VirtualizingPanel.IsVirtualizing="False"
@@ -275,7 +272,26 @@
                            TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
-            <Border Grid.Row="2" Padding="6,4" BorderThickness="0,1,0,0"
+            <!-- A newer version is available (automatic check) -->
+            <Border x:Name="UpdateBanner" Grid.Row="2" Padding="12,8" BorderThickness="0,1,0,0" Visibility="Collapsed"
+                    BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
+                    Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                <StackPanel>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Margin="0,0,10,0" Text="&#xE896;" Style="{StaticResource Glyph}"
+                                   Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock x:Name="UpdateText" VerticalAlignment="Center" TextWrapping="Wrap" />
+                    </DockPanel>
+                    <ProgressBar x:Name="UpdateProgress" Margin="0,8,0,0" Height="4" Maximum="1" Visibility="Collapsed" />
+                    <StackPanel x:Name="UpdateButtons" Margin="0,8,0,0" Orientation="Horizontal">
+                        <Button Content="Install" Style="{DynamicResource AccentButtonStyle}" Click="UpdateInstall_Click" />
+                        <Button Margin="6,0,0,0" Content="Later" Click="UpdateLater_Click" />
+                        <Button Margin="6,0,0,0" Content="Skip this version" Click="UpdateSkip_Click" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="3" Padding="6,4" BorderThickness="0,1,0,0"
                     BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
                 <DockPanel LastChildFill="False">
                     <Button x:Name="AddButton" DockPanel.Dock="Left" Style="{StaticResource FooterButton}"
@@ -291,6 +307,20 @@
                     </Button>
                 </DockPanel>
             </Border>
+
+            <!-- Rename box for the icons-only view (tiles too small for one). It lives in the window, not in a
+                 Popup, so it gets the keyboard like any other control; the canvas itself is not hit-testable.
+                 It spans the footer too (and comes last, to be drawn over it), so there is room below even a
+                 single row of tiles. -->
+            <Canvas x:Name="RenameOverlay" Grid.Row="1" Grid.RowSpan="3" ClipToBounds="True">
+                <!-- Solid host: the Fluent text box is translucent -->
+                <Border x:Name="OverlayRenameHost" Visibility="Collapsed" CornerRadius="4"
+                        Background="{DynamicResource SolidBackgroundFillColorBaseBrush}">
+                    <TextBox x:Name="OverlayRenameBox"
+                             Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                             KeyDown="RenameBox_KeyDown" LostKeyboardFocus="RenameBox_LostKeyboardFocus" />
+                </Border>
+            </Canvas>
         </Grid>
     </Border>
 </Window>

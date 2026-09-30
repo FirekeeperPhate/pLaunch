@@ -37,6 +37,13 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
         }
     }
 
+    /// <summary>After the model was edited in place (Properties): everything derived from it changed.</summary>
+    public void NotifyModelChanged()
+    {
+        foreach (var name in new[] { nameof(Name), nameof(ToolTip), nameof(Glyph), nameof(ChildInfo) })
+            OnPropertyChanged(name);
+    }
+
     public string ToolTip => Model.Kind switch
     {
         ItemKind.Group => $"{Model.Name} ({ChildInfo})",

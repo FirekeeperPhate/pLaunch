@@ -108,6 +108,59 @@ public sealed class TreeTests : IDisposable
     }
 
     [Fact]
+    public void DescribeContent_CountsShortcutsAndSubFolders()
+    {
+        Assert.Equal("2 shortcuts, 1 sub-folder", ItemTree.DescribeContent(Group("g", Url("a"), Group("h", Url("b")))));
+        Assert.Equal("2 sub-folders", ItemTree.DescribeContent(Group("g", Group("x"), Group("y"))));
+        Assert.Equal("1 shortcut", ItemTree.DescribeContent(Group("g", Url("a"), Sep())));
+        Assert.Null(ItemTree.DescribeContent(Group("g", Sep()))); // nothing worth a confirmation
+        Assert.Null(ItemTree.DescribeContent(Group("g")));
+    }
+
+    [Fact]
+    public void Store_GivesRepeatedOrMissingIdsNewOnes()
+    {
+        var path = Path.Combine(_dir, "items.json");
+        File.WriteAllText(path, """
+            { "Items": [ { "Id": "same", "Kind": "Url", "Name": "a", "Target": "https://a.example/" },
+                         { "Id": "same", "Kind": "Url", "Name": "b", "Target": "https://b.example/" },
+                         { "Id": "", "Kind": "Separator" },
+                         { "Id": "g", "Kind": "Group", "Name": "G", "Children": [ { "Id": "same", "Kind": "Url", "Name": "c", "Target": "https://c.example/" } ] },
+                         { "Kind": "Url", "Name": "no id", "Target": "https://d.example/" } ] }
+            """);
+        var store = new ItemStore(path);
+        var items = store.Load().Items;
+        var all = items.Concat(items[3].Children!).Select(i => i.Id).ToList();
+        Assert.Equal(all.Count, all.Distinct().Count());
+        Assert.Equal("same", items[0].Id); // the first keeps its id (jump list entries still work)
+        Assert.Equal("same-2", items[1].Id);
+        Assert.Equal("same-3", items[3].Children![0].Id);
+        Assert.Equal("item", items[2].Id);  // empty id
+        Assert.Equal("item-2", items[4].Id); // no "Id" at all
+        Assert.True(store.IdsRepaired);
+
+        // Another process reading the same file (a jump list entry) gets the same ids
+        var again = new ItemStore(path).Load().Items;
+        Assert.Equal(items.Select(i => i.Id), again.Select(i => i.Id));
+    }
+
+    [Fact]
+    public void Store_CleanFile_NeedsNoRepair()
+    {
+        var store = new ItemStore(Path.Combine(_dir, "items.json"));
+        store.Save([Url("a"), Group("g", Url("b"))], new LauncherSettings());
+        store.Load();
+        Assert.False(store.IdsRepaired);
+    }
+
+    [Fact]
+    public void NewItems_GetRandomIds()
+    {
+        Assert.NotEqual(new LaunchItem().Id, new LaunchItem().Id);
+        Assert.Equal(32, new LaunchItem().Id.Length);
+    }
+
+    [Fact]
     public void GroupsAndSeparators_AreNeverDuplicates()
     {
         Assert.False(Sep().IsSameTarget(Sep()));

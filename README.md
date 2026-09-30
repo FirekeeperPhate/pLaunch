@@ -21,14 +21,41 @@ shortcuts (programs, files, folders, web links, Store apps).
   color, or any color from the Windows color picker; *Translucent* lets a little of the acrylic show
   through. With a custom background the text turns light or dark by itself so it stays readable.
 - **Keyboard**: arrows and first letters to move, Enter to launch or open a sub-folder
-  (Ctrl+Shift+Enter = as administrator), Backspace or Alt+Left to go back, F2 rename, Del remove, Esc close.
-- The taskbar button's jump list (right click on the button) contains the same items.
+  (Ctrl+Shift+Enter = as administrator), **1–9** open the first nine items, Backspace or Alt+Left to go
+  back, F2 rename, Alt+Enter properties, Del remove, Esc close.
+- **Several at once**: Ctrl+click and Shift+click select several items; Enter (or right click → Open
+  selected) launches them all. A sub-folder's menu has *Open all*.
+- **Properties** (right click, Alt+Enter): name, target or URL, arguments, start-in folder, *always run as
+  administrator*, and a custom icon (the Windows icon picker; sub-folders can have one too).
+- **Drag out**: drag an item onto the desktop or into Explorer to get a shortcut to it (files and folders
+  are only ever linked, never moved or copied), or into another list.
+- **Website icons**: web links show the site's icon, fetched once and cached (… → Website icons turns it off).
+- The taskbar button's jump list (right click on the button) contains the same items, grouped by sub-folder.
 
 Pin pLaunch to the taskbar and turn on **… → Start with Windows**. The drag-and-hover trick needs
 pLaunch to be running: Windows only brings forward the windows of apps that are already open.
 
-The list is saved in `%AppData%\pLaunch\items.json` (the `PLAUNCH_DATA_DIR` environment variable
-changes the folder).
+### Several lists
+
+**… → Lists → New list…** creates another list with its own taskbar button (pin it like the first one),
+its own look, autostart and jump list; *Taskbar icon…* gives its button a different icon. A list is also
+started with `pLaunch --list "Name"`.
+
+### Backup and sync
+
+**… → Backup and sync**: export a list to a file, import one (replacing the list or as a sub-folder), or
+move the data folder, for example into OneDrive to share the lists between PCs. A list reloads by itself
+when its file is changed from elsewhere.
+
+The main list is saved in `%AppData%\pLaunch\items.json` and the others in `lists\<name>.json` next to
+it, unless the data folder was moved. The `PLAUNCH_DATA_DIR` environment variable overrides everything
+(tests, portable setups).
+
+### Updates
+
+pLaunch checks the GitHub releases once a day (… → Updates). When a newer version is out, a banner in the
+list and a badge on the taskbar button offer it: the installer of the same edition is downloaded, checked
+against its published SHA-256 digest and installed silently; every open list closes and starts again.
 
 ## Install
 
@@ -71,4 +98,7 @@ like a popup.
 - `Services/DropReader` — file drops, browser links, Shell IDList arrays (Start menu apps)
 - `Services/IconProvider` — shell icons through `IShellItemImageFactory`
 - `Services/SingleInstance` — a second start forwards its arguments to the running instance over a named pipe
-- `Services/JumpListBuilder` — the jump list entries run `pLaunch --launch <id>`
+- `Services/JumpListBuilder` — the jump list entries run `pLaunch [--list Name] --launch <id>`
+- `Services/ListProfile` — one list per process: file, AppUserModelID (own taskbar button), pipe, autostart
+- `Services/FaviconService`, `Services/UpdateService`, `Services/AppConfig` (data folder, update settings)
+- `Views/PropertiesWindow` — item properties

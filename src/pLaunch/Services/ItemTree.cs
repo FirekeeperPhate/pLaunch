@@ -88,7 +88,41 @@ public static class ItemTree
         return result;
     }
 
+    /// <summary>
+    /// "3 shortcuts, 1 sub-folder" for what a group holds at any depth, or null when it holds nothing
+    /// worth confirming (empty, or separators only).
+    /// </summary>
+    public static string? DescribeContent(LaunchItem group)
+    {
+        var (shortcuts, folders) = CountContent(group);
+        var parts = new List<string>();
+        if (shortcuts > 0)
+            parts.Add(shortcuts == 1 ? "1 shortcut" : $"{shortcuts} shortcuts");
+        if (folders > 0)
+            parts.Add(folders == 1 ? "1 sub-folder" : $"{folders} sub-folders");
+        return parts.Count > 0 ? string.Join(", ", parts) : null;
+    }
+
     /// <summary>Number of launchable items in a group, sub-folders included.</summary>
-    public static int CountLaunchables(LaunchItem group) =>
-        group.Children?.Sum(c => c.Kind == ItemKind.Group ? CountLaunchables(c) : c.IsLaunchable ? 1 : 0) ?? 0;
+    public static int CountLaunchables(LaunchItem group) => CountContent(group).Shortcuts;
+
+    /// <summary>What a group holds at any depth: shortcuts and sub-folders (separators do not count).</summary>
+    public static (int Shortcuts, int Folders) CountContent(LaunchItem group)
+    {
+        int shortcuts = 0, folders = 0;
+        foreach (var item in group.Children ?? [])
+        {
+            if (item.Kind == ItemKind.Group)
+            {
+                var (s, f) = CountContent(item);
+                shortcuts += s;
+                folders += f + 1;
+            }
+            else if (item.IsLaunchable)
+            {
+                shortcuts++;
+            }
+        }
+        return (shortcuts, folders);
+    }
 }

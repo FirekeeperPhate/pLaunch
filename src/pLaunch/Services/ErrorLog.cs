@@ -5,13 +5,13 @@ public static class ErrorLog
 {
     const long MaxBytes = 256 * 1024;
 
-    public static string FilePath { get; } = Path.Combine(ItemStore.DefaultDirectory, "errors.log");
+    public static string FilePath { get; } = Path.Combine(AppConfig.ConfigDirectory, "errors.log");
 
     public static void Write(string context, Exception ex)
     {
         try
         {
-            Directory.CreateDirectory(ItemStore.DefaultDirectory);
+            Directory.CreateDirectory(AppConfig.ConfigDirectory);
             var info = new FileInfo(FilePath);
             if (info.Exists && info.Length > MaxBytes)
                 info.Delete();

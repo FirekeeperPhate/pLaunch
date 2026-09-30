@@ -32,10 +32,11 @@ public partial class App : Application
                 ErrorLog.Write("Fatal error", ex);
         };
 
-        Autostart.Refresh();
+        var profile = _options.Profile;
+        Autostart.Refresh(profile);
 
-        var store = ItemStore.CreateDefault();
-        var window = new PopupWindow(store);
+        var store = ItemStore.For(profile);
+        var window = new PopupWindow(store, profile);
         MainWindow = window;
         window.Start(minimized: _options.Minimized && _options.Items.Count == 0);
         if (store.LoadError != null)
@@ -50,11 +51,16 @@ public partial class App : Application
 
         _instance.StartServer(args => Dispatcher.BeginInvoke(() =>
         {
-            if (args.Count > 0)
+            if (args is [SingleInstance.ReloadCommand])
+                window.ReloadData(); // another list moved the data folder
+            else if (args.Count > 0)
                 window.AddFromArguments(args);
             else
                 window.ShowPopup();
         }));
+
+        // An update about to be installed closes every list; the installer starts them again
+        UpdateService.ListenForExit(profile, () => Dispatcher.BeginInvoke(() => Shutdown()));
     }
 
     void OnDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)

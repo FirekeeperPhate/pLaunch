@@ -2,44 +2,45 @@ using Microsoft.Win32;
 
 namespace pLaunch.Services;
 
-/// <summary>"Start with Windows" through the per-user Run key; pLaunch then starts minimized.</summary>
+/// <summary>
+/// "Start with Windows" through the per-user Run key, one value per list ("pLaunch", "pLaunch (Work)");
+/// the list then starts minimized.
+/// </summary>
 public static class Autostart
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string ValueName = "pLaunch";
 
-    static string Command => $"\"{Environment.ProcessPath}\" --minimized";
+    static string Command(ListProfile profile) => $"\"{Environment.ProcessPath}\" {profile.Arguments}--minimized";
 
-    public static bool IsEnabled
+    public static bool IsEnabled(ListProfile profile)
     {
-        get
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            return key?.GetValue(ValueName) is string;
-        }
-        set
-        {
-            using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-            if (value)
-                key.SetValue(ValueName, Command);
-            else
-                key.DeleteValue(ValueName, throwOnMissingValue: false);
-        }
+        using var key = Registry.CurrentUser.OpenSubKey(RunKey);
+        return key?.GetValue(profile.AutostartValueName) is string;
+    }
+
+    public static void SetEnabled(ListProfile profile, bool enabled)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(RunKey);
+        if (enabled)
+            key.SetValue(profile.AutostartValueName, Command(profile));
+        else
+            key.DeleteValue(profile.AutostartValueName, throwOnMissingValue: false);
     }
 
     /// <summary>
     /// Points an existing entry at the current exe when its own exe is gone (the app was moved).
     /// A working entry is left alone: a second copy (a dev build) must not take over the installed one.
     /// </summary>
-    public static void Refresh()
+    public static void Refresh(ListProfile profile)
     {
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            if (key?.GetValue(ValueName) is not string current || current == Command || File.Exists(ExePath(current)))
+            if (key?.GetValue(profile.AutostartValueName) is not string current || current == Command(profile)
+                || File.Exists(ExePath(current)))
                 return;
             using var writable = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
-            writable?.SetValue(ValueName, Command);
+            writable?.SetValue(profile.AutostartValueName, Command(profile));
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
         {

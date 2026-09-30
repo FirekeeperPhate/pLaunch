@@ -82,6 +82,9 @@ Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#AppName}"; Val
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; Automatic update (pLaunch runs setup with /SILENT /RELAUNCH=1): start again the lists that were open,
+; as the user who ran it (not elevated, also for an all-users install)
+Filename: "{app}\{#AppExe}"; Parameters: "--after-update"; Flags: nowait runasoriginaluser; Check: ShouldRelaunch
 
 [Code]
 { Switching edition (Full <-> Light) or upgrading: remove the previous program files so no
@@ -129,12 +132,43 @@ end;
   The list of shortcuts (AppData\Roaming\pLaunch) is kept, like an app's settings. }
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  Command: String;
+  Names: TArrayOfString;
+  Command, Name: String;
+  I: Integer;
 begin
-  if (CurUninstallStep = usPostUninstall) and
-     RegQueryStringValue(HKCU, '{#RunKey}', '{#AppName}', Command) and
-     (Pos(Lowercase(AddBackslash(ExpandConstant('{app}'))), Lowercase(Command)) > 0) then
-    RegDeleteValue(HKCU, '{#RunKey}', '{#AppName}');
+  if CurUninstallStep <> usPostUninstall then
+    Exit;
+  { "pLaunch" and the named lists' "pLaunch (Name)" }
+  if RegGetValueNames(HKCU, '{#RunKey}', Names) then
+    for I := 0 to GetArrayLength(Names) - 1 do
+    begin
+      Name := Names[I];
+      if ((CompareText(Name, '{#AppName}') = 0) or (CompareText(Copy(Name, 1, 9), '{#AppName} (') = 0)) and
+         RegQueryStringValue(HKCU, '{#RunKey}', Name, Command) and
+         (Pos(Lowercase(AddBackslash(ExpandConstant('{app}'))), Lowercase(Command)) > 0) then
+        RegDeleteValue(HKCU, '{#RunKey}', Name);
+    end;
+end;
+
+{ Automatic update: pLaunch asked every list to close just before starting setup }
+function ShouldRelaunch: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
+end;
+
+{ Gives the lists time to close before the AppMutex check (which comes after InitializeSetup) }
+procedure WaitForListsToClose;
+var
+  Waited: Integer;
+begin
+  if ExpandConstant('{param:RELAUNCH|0}') <> '1' then
+    Exit;
+  Waited := 0;
+  while CheckForMutexes('pLaunch.Running') and (Waited < 20000) do
+  begin
+    Sleep(250);
+    Waited := Waited + 250;
+  end;
 end;
 
 #if Flavor == "Light"
@@ -198,5 +232,13 @@ begin
       IDCANCEL:
         Result := False;
     end;
+  if Result then
+    WaitForListsToClose;
+end;
+#else
+function InitializeSetup: Boolean;
+begin
+  WaitForListsToClose;
+  Result := True;
 end;
 #endif

@@ -4,27 +4,40 @@ using pLaunch.Models;
 
 namespace pLaunch.Services;
 
-/// <summary>Persists the launcher items as JSON (%AppData%\pLaunch\items.json).</summary>
+/// <summary>Persists a list as JSON (items.json for the default list, lists\&lt;name&gt;.json for the others).</summary>
 public sealed class ItemStore
 {
     static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
+        // Not WhenWritingDefault: settings that default to true (Translucent, WebIcons) would be dropped
+        // when false and come back true
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         Converters = { new JsonStringEnumConverter() },
     };
-
-    /// <summary>%AppData%\pLaunch, or PLAUNCH_DATA_DIR when set (tests, portable setups).</summary>
-    public static string DefaultDirectory { get; } =
-        Environment.GetEnvironmentVariable("PLAUNCH_DATA_DIR") is { Length: > 0 } custom
-            ? custom
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "pLaunch");
 
     public string FilePath { get; }
 
     public ItemStore(string filePath) => FilePath = filePath;
 
-    public static ItemStore CreateDefault() => new(Path.Combine(DefaultDirectory, "items.json"));
+    /// <summary>The store of a list in the current data folder.</summary>
+    public static ItemStore For(ListProfile profile) => new(profile.FilePath(AppConfig.DataDirectoryPath));
+
+    /// <summary>
+    /// Hash of the content last read or written by this store: a change notification whose content
+    /// differs came from elsewhere (another PC through a synced folder, an editor).
+    /// </summary>
+    public string? LastContentHash { get; private set; }
+
+    public static string HashOf(string text) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
+
+    /// <summary>Current hash of the file, or null when it cannot be read right now.</summary>
+    public string? ReadFileHash()
+    {
+        try { return File.Exists(FilePath) ? HashOf(File.ReadAllText(FilePath)) : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
 
     /// <summary>
     /// Set when the file exists but could not be read: the list starts empty and <see cref="Save"/>
@@ -32,15 +45,23 @@ public sealed class ItemStore
     /// </summary>
     public string? LoadError { get; private set; }
 
+    /// <summary>
+    /// The last <see cref="Load"/> had to give items new ids (missing or repeated ones): the caller that
+    /// owns the list should save it, so the file matches what the jump list refers to.
+    /// </summary>
+    public bool IdsRepaired { get; private set; }
+
     public StoreData Load()
     {
         LoadError = null;
+        IdsRepaired = false;
         if (!File.Exists(FilePath))
             return StoreData.Empty();
         string json;
         try
         {
             json = ReadWithRetry();
+            LastContentHash = HashOf(json);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -61,14 +82,30 @@ public sealed class ItemStore
         }
     }
 
-    /// <summary>Drops entries that cannot work (no target) at every level; sub-folders keep their content.</summary>
-    static List<LaunchItem> Sanitize(List<LaunchItem>? items)
+    /// <summary>
+    /// Drops entries that cannot work (no target) at every level; sub-folders keep their content.
+    /// Missing or repeated ids (a hand-edited or merged file) get new ones: the popup, moves and the
+    /// jump list ("--launch &lt;id&gt;") all find items by id. The new ids are derived from the file
+    /// ("same" -> "same-2", missing -> "item"), so another process reading the same file (the one a jump
+    /// list entry starts) comes to the same ids even before the list is saved again.
+    /// </summary>
+    List<LaunchItem> Sanitize(List<LaunchItem>? items, HashSet<string>? ids = null)
     {
+        ids ??= [];
         var result = new List<LaunchItem>();
         foreach (var item in items ?? [])
         {
             if (item == null)
                 continue;
+            if (string.IsNullOrWhiteSpace(item.Id) || !ids.Add(item.Id))
+            {
+                var baseId = string.IsNullOrWhiteSpace(item.Id) ? "item" : item.Id;
+                var candidate = baseId;
+                for (int n = 2; !ids.Add(candidate); n++)
+                    candidate = $"{baseId}-{n}";
+                item.Id = candidate;
+                IdsRepaired = true;
+            }
             switch (item.Kind)
             {
                 case ItemKind.Separator:
@@ -76,7 +113,7 @@ public sealed class ItemStore
                     result.Add(item);
                     break;
                 case ItemKind.Group:
-                    item.Children = Sanitize(item.Children);
+                    item.Children = Sanitize(item.Children, ids);
                     if (string.IsNullOrWhiteSpace(item.Name))
                         item.Name = "Folder";
                     result.Add(item);
@@ -119,6 +156,7 @@ public sealed class ItemStore
         var json = JsonSerializer.Serialize(new StoreDocument { Settings = settings, Items = items.ToList() }, JsonOptions);
         var temp = FilePath + ".tmp";
         File.WriteAllText(temp, json);
+        LastContentHash = HashOf(json);
         File.Move(temp, FilePath, overwrite: true);
     }
 

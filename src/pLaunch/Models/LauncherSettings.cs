@@ -41,4 +41,12 @@ public sealed class LauncherSettings
     public string? Background { get; set; }
     /// <summary>A custom background lets a little of the acrylic show through; false = solid.</summary>
     public bool Translucent { get; set; } = true;
+    /// <summary>Web links show the site's icon (fetched from the site once, then cached).</summary>
+    public bool WebIcons { get; set; } = true;
+    /// <summary>
+    /// Icon of this list's taskbar button (named lists only): an .ico/.png, or an .exe/.dll with
+    /// <see cref="ButtonIconIndex"/>; null = the pLaunch icon.
+    /// </summary>
+    public string? ButtonIconPath { get; set; }
+    public int ButtonIconIndex { get; set; }
 }

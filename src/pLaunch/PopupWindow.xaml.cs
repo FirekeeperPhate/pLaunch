@@ -30,9 +30,11 @@ public partial class PopupWindow : Window
     /// <summary>Holding a drag over a sub-folder opens it; over the back button, goes up.</summary>
     static readonly TimeSpan SpringDelay = TimeSpan.FromMilliseconds(800);
 
-    readonly ItemStore _store;
-    readonly List<LaunchItem> _root;
-    readonly LauncherSettings _settings;
+    readonly ListProfile _profile;
+    // Replaced when the list is reloaded (synced from another PC, data folder moved)
+    ItemStore _store;
+    List<LaunchItem> _root;
+    LauncherSettings _settings;
     /// <summary>The sub-folders opened, from the top level down to the one shown.</summary>
     readonly List<LaunchItem> _path = [];
     /// <summary>What the list shows: the current level in display order.</summary>
@@ -42,7 +44,7 @@ public partial class PopupWindow : Window
     readonly DispatcherTimer _dragLeaveTimer;
     readonly DispatcherTimer _hoverWatch;
     readonly DispatcherTimer _springTimer;
-    readonly JumpListBuilder _jumpList = new();
+    readonly JumpListBuilder _jumpList;
     ViewMetrics _metrics = ViewMetrics.For(ViewMode.List, ItemSize.Medium);
     IntPtr _hwnd;
     int _suppressHide;
@@ -56,13 +58,17 @@ public partial class PopupWindow : Window
     bool _acrylic;
     object? _springTarget; // an ItemViewModel (sub-folder to open) or the Header (go back)
 
-    public PopupWindow(ItemStore store)
+    public PopupWindow(ItemStore store, ListProfile? profile = null)
     {
         InitializeComponent();
+        _profile = profile ?? ListProfile.Default;
+        _jumpList = new JumpListBuilder(_profile);
+        Title = _profile.Title;
         _store = store;
         var data = store.Load();
         _root = data.Items;
         _settings = data.Settings;
+        IconProvider.WebIconsEnabled = _settings.WebIcons;
         List.ItemsSource = _items;
         _items.CollectionChanged += (_, _) => UpdateEmptyHint();
 
@@ -88,9 +94,15 @@ public partial class PopupWindow : Window
         Drop += OnDrop;
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         Closed += (_, _) => SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        List.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(OnListScrolled));
 
         ApplyView();
         ApplyAppearance();
+        // Ids repaired while loading: write them now, before the jump list refers to them
+        if (store.IdsRepaired && store.LoadError == null)
+            Save();
+        WatchStoreFile();
+        InitUpdates();
     }
 
     bool IsOpen => IsVisible && WindowState == WindowState.Normal;
@@ -158,6 +170,13 @@ public partial class PopupWindow : Window
                 CommitRename();
                 ClearDropMarkers();
                 SetSpringTarget(null);
+                // Back to the top level while hidden: the next opening starts there, like a menu, and items
+                // forwarded meanwhile ("Send to", command line) do not land in a sub-folder nobody sees
+                if (_path.Count > 0)
+                {
+                    _path.Clear();
+                    Refresh();
+                }
                 break;
         }
     }
@@ -165,12 +184,6 @@ public partial class PopupWindow : Window
     void OnPopupOpened()
     {
         NativeMethods.GetCursorPos(out _anchor);
-        // Every opening starts from the top level, like a menu
-        if (_path.Count > 0)
-        {
-            _path.Clear();
-            Refresh();
-        }
         Place();
         if (ActivateOnOpen)
             Activate();
@@ -276,6 +289,7 @@ public partial class PopupWindow : Window
         // No acrylic before Windows 11 22H2: a solid background then
         _acrylic = NativeMethods.SetDwmInt(_hwnd, NativeMethods.DWMWA_SYSTEMBACKDROP_TYPE, NativeMethods.DWMSBT_TRANSIENTWINDOW) == 0;
         ApplyAppearance();
+        ApplyListIdentity();
     }
 
     /// <summary>
@@ -361,6 +375,7 @@ public partial class PopupWindow : Window
         List.ItemsPanel = (ItemsPanelTemplate)Resources[list ? "StackPanelTemplate" : "WrapPanelTemplate"];
         List.ItemContainerStyle = (Style)Resources[list ? "ListContainer" : "TileContainer"];
         List.ItemTemplateSelector = new ItemTemplateChooser(Resources, _settings.View);
+        _items.Clear(); // other templates: every container is rebuilt anyway
         Refresh();
     }
 
@@ -370,19 +385,31 @@ public partial class PopupWindow : Window
         ApplyView();
     }
 
-    /// <summary>Rebuilds the shown level from the model, keeping (or moving) the selection.</summary>
+    /// <summary>
+    /// Brings the shown list in line with the model, keeping (or moving) the selection. The collection is
+    /// updated in place (moves, inserts, removals), so the scroll position and the existing rows survive.
+    /// </summary>
     void Refresh(string? selectId = null)
     {
         selectId ??= (List.SelectedItem as ItemViewModel)?.Model.Id;
-        _items.Clear();
-        foreach (var item in ItemTree.DisplayOrder(CurrentLevel, _settings.Sort))
+        var target = ItemTree.DisplayOrder(CurrentLevel, _settings.Sort).Select(ViewModelFor).ToList();
+        for (int i = 0; i < target.Count; i++)
         {
-            var vm = ViewModelFor(item);
+            var vm = target[i];
             vm.DropMarker = DropMarker.None;
             if (vm.IsGroup)
                 vm.RefreshChildInfo();
-            _items.Add(vm);
+            if (i < _items.Count && _items[i] == vm)
+                continue;
+            // Positions before i already match the target, so a view model still present is further down
+            int at = _items.IndexOf(vm);
+            if (at > i)
+                _items.Move(at, i);
+            else
+                _items.Insert(i, vm);
         }
+        while (_items.Count > target.Count)
+            _items.RemoveAt(_items.Count - 1);
 
         Header.Visibility = _path.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         HeaderTitle.Text = string.Join(" \x203A ", _path.Select(g => g.Name));
@@ -418,8 +445,11 @@ public partial class PopupWindow : Window
         _path.Add(group);
         Refresh();
         List.SelectedIndex = -1;
+        ScrollToTop(); // a new level: the list is updated in place, so it would keep the old offset
         List.Focus();
     }
+
+    void ScrollToTop() => FindChild<ScrollViewer>(List)?.ScrollToHome();
 
     void GoBack()
     {
@@ -501,11 +531,11 @@ public partial class PopupWindow : Window
     void Remove(ItemViewModel vm)
     {
         var item = vm.Model;
-        if (item.Kind == ItemKind.Group && item.Children is { Count: > 0 })
+        // A folder with something in it (separators alone do not count) asks first
+        if (item.Kind == ItemKind.Group && ItemTree.DescribeContent(item) is { } content)
         {
-            int count = ItemTree.CountLaunchables(item);
             var answer = ShowModal(() => MessageBox.Show(this,
-                $"Remove the folder \"{item.Name}\" and the {count} shortcut{(count == 1 ? "" : "s")} in it?",
+                $"Remove the folder \"{item.Name}\" and everything in it ({content})?",
                 "pLaunch", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No));
             if (answer != MessageBoxResult.Yes)
                 return;
@@ -518,11 +548,30 @@ public partial class PopupWindow : Window
         Forget(item);
         Save();
         Refresh();
-        if (_items.Count > 0)
+        // The next item takes the selection; separators are skipped (a second Del must not remove one)
+        int next = NextSelectable(displayIndex);
+        if (next >= 0)
         {
-            List.SelectedIndex = Math.Clamp(displayIndex, 0, _items.Count - 1);
+            List.SelectedIndex = next;
+            List.ScrollIntoView(List.SelectedItem);
             FocusSelected();
         }
+    }
+
+    /// <summary>The first non-separator at or after <paramref name="index"/>, else before it; -1 if none.</summary>
+    int NextSelectable(int index)
+    {
+        for (int i = Math.Max(index, 0); i < _items.Count; i++)
+        {
+            if (!_items[i].IsSeparator)
+                return i;
+        }
+        for (int i = Math.Min(index, _items.Count) - 1; i >= 0; i--)
+        {
+            if (!_items[i].IsSeparator)
+                return i;
+        }
+        return -1;
     }
 
     void Forget(LaunchItem item)
@@ -604,6 +653,45 @@ public partial class PopupWindow : Window
             Launch(item, asAdmin);
     }
 
+    /// <summary>The selected items in display order (Ctrl/Shift+click select several).</summary>
+    List<ItemViewModel> SelectedItems() =>
+        _items.Where(i => List.SelectedItems.Contains(i) && !i.IsSeparator).ToList();
+
+    /// <summary>Launches several shortcuts at once and closes the popup; a list of what failed, if anything.</summary>
+    void LaunchMany(IReadOnlyCollection<LaunchItem> items, string what)
+    {
+        const int askAbove = 10;
+        if (items.Count > askAbove && ShowModal(() => MessageBox.Show(this, $"Open {items.Count} {what}?", "pLaunch",
+                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)) != MessageBoxResult.Yes)
+            return;
+        var (started, errors) = Launcher.LaunchAll(items);
+        if (errors.Count > 0)
+            ShowError(started > 0 ? $"{started} opened, {errors.Count} could not be opened:" : "Nothing could be opened:",
+                string.Join("\n", errors.Take(10)));
+        else if (started > 0)
+            HidePopup();
+    }
+
+    /// <summary>"Open all": the shortcuts directly inside a sub-folder (not those of its own sub-folders).</summary>
+    void OpenAll(LaunchItem group) =>
+        LaunchMany((group.Children ?? []).Where(c => c.IsLaunchable).ToList(), $"shortcuts from \"{group.Name}\"");
+
+    void ShowProperties(ItemViewModel vm)
+    {
+        if (vm.IsSeparator)
+            return;
+        CommitRename();
+        var dialog = new Views.PropertiesWindow(vm.Model) { Owner = this };
+        if (ShowModal(() => dialog.ShowDialog()) != true)
+            return;
+        vm.NotifyModelChanged(); // name, tooltip, glyph
+        vm.Icon = null;          // target or icon changed: load again
+        vm.IconPixels = 0;
+        vm.IsMissing = Launcher.IsMissing(vm.Model);
+        Save();
+        Refresh(vm.Model.Id);
+    }
+
     void Launch(ItemViewModel item, bool asAdmin = false)
     {
         if (Launcher.IsMissing(item.Model))
@@ -657,7 +745,7 @@ public partial class PopupWindow : Window
         int pixels = IconPixels;
         foreach (var item in _items)
         {
-            if (item.Model.IsLaunchable && !item.IconPending && (item.Icon == null || item.IconPixels != pixels))
+            if (item.Model.HasShellIcon && !item.IconPending && (item.Icon == null || item.IconPixels != pixels))
                 LoadIcon(item, pixels);
         }
     }
@@ -690,12 +778,64 @@ public partial class PopupWindow : Window
         item.IsEditing = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
-            if (List.ItemContainerGenerator.ContainerFromItem(item) is ListBoxItem container && FindRenameBox(container) is { } box)
+            if (!item.IsEditing || List.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem container)
+                return;
+            var box = _settings.View == ViewMode.Icons ? ShowOverlayRenameBox(container, item) : FindChild<TextBox>(container);
+            if (box != null)
             {
                 box.Focus();
                 box.SelectAll();
             }
         });
+    }
+
+    /// <summary>Icons-only view: the window's rename box, under the tile (above it on the last row).</summary>
+    TextBox ShowOverlayRenameBox(ListBoxItem container, ItemViewModel item)
+    {
+        var host = OverlayRenameHost;
+        host.DataContext = item;
+        host.Width = Math.Min(200, Math.Max(80, RenameOverlay.ActualWidth - 8));
+        host.Visibility = Visibility.Visible;
+        host.UpdateLayout();
+        PlaceOverlayRenameBox(container);
+        return OverlayRenameBox;
+    }
+
+    void PlaceOverlayRenameBox(ListBoxItem container)
+    {
+        var host = OverlayRenameHost;
+        var tile = container.TranslatePoint(new Point(0, 0), RenameOverlay);
+        double left = tile.X + container.ActualWidth / 2 - host.Width / 2;
+        double top = tile.Y + container.ActualHeight + 2;
+        if (top + host.ActualHeight > RenameOverlay.ActualHeight)
+            top = tile.Y - host.ActualHeight - 2;
+        Canvas.SetLeft(host, Math.Clamp(left, 4, Math.Max(4, RenameOverlay.ActualWidth - host.Width - 4)));
+        Canvas.SetTop(host, Math.Max(0, top));
+    }
+
+    /// <summary>The icons-only rename box follows its tile; once the tile scrolls out of view the rename is done.</summary>
+    void OnListScrolled(object sender, ScrollChangedEventArgs e)
+    {
+        if (e.VerticalChange == 0 || OverlayRenameHost.Visibility != Visibility.Visible
+            || OverlayRenameHost.DataContext is not ItemViewModel item
+            || List.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem container)
+            return;
+        double top = container.TranslatePoint(new Point(0, 0), List).Y;
+        if (top + container.ActualHeight <= 0 || top >= List.ActualHeight)
+        {
+            CommitRename();
+            List.Focus();
+        }
+        else
+        {
+            PlaceOverlayRenameBox(container);
+        }
+    }
+
+    void HideOverlayRenameBox()
+    {
+        OverlayRenameHost.Visibility = Visibility.Collapsed;
+        OverlayRenameHost.DataContext = null;
     }
 
     void CommitRename(bool cancel = false)
@@ -711,6 +851,10 @@ public partial class PopupWindow : Window
                 renamed = true;
             }
         }
+        // Hidden after the loop: collapsing the focused box raises LostKeyboardFocus, which lands back
+        // here and finds nothing left to commit
+        if (OverlayRenameHost.Visibility == Visibility.Visible)
+            HideOverlayRenameBox();
         if (!renamed)
             return;
         Save();
@@ -729,10 +873,6 @@ public partial class PopupWindow : Window
     }
 
     void RenameBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) => CommitRename();
-
-    /// <summary>The rename box of a row or tile; in the icons-only view it sits in a popup below the tile.</summary>
-    static TextBox? FindRenameBox(ListBoxItem container) =>
-        FindChild<TextBox>(container) ?? (FindChild<Popup>(container)?.Child as TextBox);
 
     // ---------------------------------------------------------------- keyboard and mouse
 
@@ -767,13 +907,22 @@ public partial class PopupWindow : Window
             case Key.Right when _settings.View == ViewMode.List && selected is { IsGroup: true }:
                 OpenGroup(selected.Model);
                 break;
+            case Key.Enter when List.SelectedItems.Count > 1:
+                LaunchMany(SelectedItems().Select(i => i.Model).Where(m => m.IsLaunchable).ToList(), "shortcuts");
+                break;
             case Key.Enter when selected != null:
                 // Ctrl+Shift+Enter runs as administrator, like in the Start menu
                 Open(selected, asAdmin: Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift)
                                         && Launcher.CanRunAsAdmin(selected.Model));
                 break;
+            case Key.System when e.SystemKey == Key.Enter && selected is { IsSeparator: false }: // Alt+Enter
+                ShowProperties(selected);
+                break;
             case Key.F2 when selected is { IsSeparator: false }:
                 StartRename(selected);
+                break;
+            case Key.Delete when List.SelectedItems.Count > 1:
+                RemoveMany(SelectedItems());
                 break;
             case Key.Delete when selected != null:
                 Remove(selected);
@@ -781,10 +930,57 @@ public partial class PopupWindow : Window
             case Key.V when Keyboard.Modifiers == ModifierKeys.Control:
                 PasteFromClipboard();
                 break;
+            case >= Key.D1 and <= Key.D9 when Keyboard.Modifiers == ModifierKeys.None:
+                OpenByNumber(e.Key - Key.D1);
+                break;
+            case >= Key.NumPad1 and <= Key.NumPad9 when Keyboard.Modifiers == ModifierKeys.None:
+                OpenByNumber(e.Key - Key.NumPad1);
+                break;
             default:
                 return;
         }
         e.Handled = true;
+    }
+
+    /// <summary>Keys 1-9: the n-th item of the level shown (separators do not count).</summary>
+    void OpenByNumber(int index)
+    {
+        var item = _items.Where(i => !i.IsSeparator).ElementAtOrDefault(index);
+        if (item != null)
+            Open(item);
+    }
+
+    void RemoveMany(List<ItemViewModel> items)
+    {
+        if (items.Count == 1)
+        {
+            Remove(items[0]);
+            return;
+        }
+        var folders = items.Count(i => i.IsGroup && ItemTree.DescribeContent(i.Model) != null);
+        var message = folders > 0
+            ? $"Remove {items.Count} items, including {folders} folder{(folders == 1 ? "" : "s")} and everything in {(folders == 1 ? "it" : "them")}?"
+            : $"Remove {items.Count} items?";
+        if (ShowModal(() => MessageBox.Show(this, message, "pLaunch", MessageBoxButton.YesNo, MessageBoxImage.Question,
+                MessageBoxResult.No)) != MessageBoxResult.Yes)
+            return;
+        int first = items.Min(i => _items.IndexOf(i));
+        foreach (var vm in items)
+        {
+            if (ItemTree.FindContainer(_root, vm.Model.Id) is { } container)
+            {
+                container.Remove(vm.Model);
+                Forget(vm.Model);
+            }
+        }
+        Save();
+        List.SelectedItems.Clear();
+        Refresh();
+        if (NextSelectable(first) is var next and >= 0)
+        {
+            List.SelectedIndex = next;
+            FocusSelected();
+        }
     }
 
     void List_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -810,7 +1006,8 @@ public partial class PopupWindow : Window
         _draggingId = item.Model.Id;
         try
         {
-            DragDrop.DoDragDrop(List, new DataObject(InternalDragFormat, item.Model.Id), DragDropEffects.Move);
+            var (data, effects) = CreateDragData(item.Model);
+            DragDrop.DoDragDrop(List, data, effects);
         }
         finally
         {
@@ -821,12 +1018,14 @@ public partial class PopupWindow : Window
         }
     }
 
-    // A single click launches, like the old Quick Launch (or opens a sub-folder)
+    // A single click launches, like the old Quick Launch (or opens a sub-folder); with Ctrl or Shift it
+    // only selects, to open several items at once with Enter
     void List_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         var item = _pressed;
         _pressed = null;
-        if (item != null && ItemAt(e.OriginalSource) == item)
+        if (item != null && ItemAt(e.OriginalSource) == item
+            && (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) == 0)
         {
             e.Handled = true;
             Open(item);
@@ -835,29 +1034,115 @@ public partial class PopupWindow : Window
 
     void List_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (ItemAt(e.OriginalSource) is { } item && !item.IsSeparator)
-            List.SelectedItem = item;
+        if (IsInScrollBar(e.OriginalSource))
+            return; // the scroll bar is not a blank area: the selection stays
+        var item = ItemAt(e.OriginalSource);
+        if (item == null)
+            List.SelectedItem = null; // blank area: what the menu adds goes at the end
+        else if (!item.IsSeparator && !List.SelectedItems.Contains(item))
+            List.SelectedItem = item; // a right click inside a multiple selection keeps it
+        if (item != null && !item.IsSeparator)
+            e.Handled = List.SelectedItems.Count > 1; // the ListBox would reduce the selection to this item
+    }
+
+    /// <summary>
+    /// What a drag carries: the item id (moving it inside pLaunch) and, for launchable items, something
+    /// Explorer and other apps understand. Real files and folders are offered as a link only, so a drop on
+    /// the desktop creates a shortcut and can never move or copy the file itself.
+    /// </summary>
+    (DataObject Data, DragDropEffects Effects) CreateDragData(LaunchItem item)
+    {
+        var data = new DataObject();
+        data.SetData(InternalDragFormat, item.Id);
+        var effects = DragDropEffects.Link;
+        switch (item.Kind)
+        {
+            case ItemKind.File or ItemKind.Folder when !Launcher.IsMissing(item):
+                data.SetFileDropList([item.Target]);
+                break;
+            case ItemKind.Url:
+                data.SetText(item.Target);
+                if (CreateUrlFile(item) is { } urlFile)
+                {
+                    // A temporary "Name.url": copying it is harmless, and it gives the shortcut its name
+                    data.SetFileDropList([urlFile]);
+                    effects |= DragDropEffects.Copy;
+                }
+                break;
+            case ItemKind.Shell when ShellInterop.CreateIdListArray(item.Target) is { } idList:
+                data.SetData(DropReader.ShellIdListFormat, idList);
+                break;
+        }
+        return (data, effects);
+    }
+
+    static string? CreateUrlFile(LaunchItem item)
+    {
+        try
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "pLaunch-links");
+            Directory.CreateDirectory(folder);
+            var name = string.Concat(item.Name.Split(Path.GetInvalidFileNameChars())).Trim();
+            var file = Path.Combine(folder, (name.Length > 0 ? name : "Link") + ".url");
+            File.WriteAllText(file, $"[InternetShortcut]\r\nURL={item.Target}\r\n");
+            return file;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     void List_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
-        var item = ItemAt(e.OriginalSource) ?? List.SelectedItem as ItemViewModel;
-        if (item == null || item.IsEditing)
+        if (IsInScrollBar(e.OriginalSource))
+        {
+            // Its own menu (if the theme gives it one) opens by itself; ours has nothing to offer there
+            if (FindAncestor<ScrollBar>(e.OriginalSource)?.ContextMenu == null)
+                e.Handled = true;
+            return;
+        }
+        // The item clicked; from the keyboard (Menu key, Shift+F10: no cursor position) the selected one
+        // even when the focus is on the list rather than on its row. Never an older selection for a click.
+        bool fromKeyboard = e.CursorLeft < 0 && e.CursorTop < 0;
+        var item = ItemAt(e.OriginalSource) ?? (fromKeyboard ? List.SelectedItem as ItemViewModel : null);
+        var menu = List.ContextMenu!;
+        menu.Items.Clear();
+        if (item == null)
+        {
+            FillAddMenu(menu); // blank area
+            return;
+        }
+        if (item.IsEditing)
         {
             e.Handled = true;
             return;
         }
-        var menu = List.ContextMenu!;
-        menu.Items.Clear();
         if (item.IsSeparator)
         {
             menu.Items.Add(CreateMenuItem("Remove separator", () => Remove(item), "\xE74D"));
             return;
         }
 
+        // Several items selected (Ctrl/Shift+click) and the click was on one of them: commands for all
+        var selection = SelectedItems();
+        if (selection.Count > 1 && selection.Contains(item))
+        {
+            var launchable = selection.Where(i => i.Model.IsLaunchable).Select(i => i.Model).ToList();
+            var openSelected = CreateMenuItem($"Open {launchable.Count} selected", () => LaunchMany(launchable, "shortcuts"), "\xE8A7", "Enter");
+            openSelected.FontWeight = FontWeights.SemiBold;
+            openSelected.IsEnabled = launchable.Count > 0;
+            menu.Items.Add(openSelected);
+            menu.Items.Add(new Separator());
+            menu.Items.Add(CreateMenuItem($"Remove {selection.Count} items", () => RemoveMany(selection), "\xE74D", "Del"));
+            return;
+        }
+
         var open = CreateMenuItem("Open", () => Open(item), item.IsGroup ? "\xE838" : "\xE8A7");
         open.FontWeight = FontWeights.SemiBold;
         menu.Items.Add(open);
+        if (item.IsGroup && (item.Model.Children ?? []).Count(c => c.IsLaunchable) is var count and > 0)
+            menu.Items.Add(CreateMenuItem($"Open all ({count})", () => OpenAll(item.Model), "\xE8A7"));
         if (Launcher.CanRunAsAdmin(item.Model))
             menu.Items.Add(CreateMenuItem("Run as administrator", () => Launch(item, asAdmin: true), "\xEA18", "Ctrl+Shift+Enter"));
         if (Launcher.HasLocation(item.Model))
@@ -865,6 +1150,7 @@ public partial class PopupWindow : Window
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem("Rename", () => StartRename(item), "\xE8AC", "F2"));
         menu.Items.Add(CreateMenuItem("Remove", () => Remove(item), "\xE74D", "Del"));
+        menu.Items.Add(CreateMenuItem("Properties\x2026", () => ShowProperties(item), "\xE946", "Alt+Enter"));
         menu.Items.Add(new Separator());
         // Inserted right after this item (it is the selected one)
         menu.Items.Add(CreateMenuItem("New folder here", NewFolder, "\xE8F4"));
@@ -874,6 +1160,13 @@ public partial class PopupWindow : Window
     void AddButton_Click(object sender, RoutedEventArgs e)
     {
         var menu = new ContextMenu { PlacementTarget = AddButton, Placement = PlacementMode.Top };
+        FillAddMenu(menu);
+        menu.IsOpen = true;
+    }
+
+    /// <summary>The Add commands: the footer button, and a right click on a blank part of the list.</summary>
+    void FillAddMenu(ContextMenu menu)
+    {
         menu.Items.Add(CreateMenuItem("Files\x2026", AddFiles, "\xE8E5"));
         menu.Items.Add(CreateMenuItem("Folder\x2026", AddFolder, "\xE8B7"));
         menu.Items.Add(new Separator());
@@ -883,7 +1176,6 @@ public partial class PopupWindow : Window
         var paste = CreateMenuItem("Paste", PasteFromClipboard, "\xE77F", "Ctrl+V");
         paste.IsEnabled = ClipboardHasItems();
         menu.Items.Add(paste);
-        menu.IsOpen = true;
     }
 
     void MenuButton_Click(object sender, RoutedEventArgs e)
@@ -918,15 +1210,35 @@ public partial class PopupWindow : Window
         }
         menu.Items.Add(theme);
         menu.Items.Add(CreateBackgroundMenu());
+        var webIcons = new MenuItem { Header = "Website icons", IsCheckable = true, IsChecked = _settings.WebIcons,
+            ToolTip = "Web links show the site's icon, fetched once from the site" };
+        webIcons.Click += (_, _) => SetWebIcons(webIcons.IsChecked);
+        menu.Items.Add(webIcons);
 
         menu.Items.Add(new Separator());
+        menu.Items.Add(CreateListsMenu());
+        menu.Items.Add(CreateDataMenu());
         var autostart = new MenuItem { Header = "Start with Windows", IsCheckable = true, IsChecked = SafeAutostart() };
         autostart.Click += (_, _) => SetAutostart(autostart.IsChecked);
         menu.Items.Add(autostart);
-        menu.Items.Add(CreateMenuItem("Open data folder", OpenDataFolder, "\xE838"));
+        menu.Items.Add(CreateUpdatesMenu());
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem("Exit", Close, "\xE711"));
         menu.IsOpen = true;
+    }
+
+    void SetWebIcons(bool enabled)
+    {
+        _settings.WebIcons = enabled;
+        IconProvider.WebIconsEnabled = enabled;
+        Save();
+        // Web links show the other kind of icon now
+        foreach (var vm in _viewModels.Values.Where(v => v.Model.Kind == ItemKind.Url && string.IsNullOrWhiteSpace(v.Model.IconPath)))
+        {
+            vm.Icon = null;
+            vm.IconPixels = 0;
+        }
+        QueueIconLoad();
     }
 
     MenuItem CreateBackgroundMenu()
@@ -1063,11 +1375,12 @@ public partial class PopupWindow : Window
 
     // ---------------------------------------------------------------- drag and drop
 
-    static bool IsAcceptable(IDataObject data)
+    bool IsAcceptable(IDataObject data)
     {
         try
         {
-            return data.GetDataPresent(InternalDragFormat) || DropReader.CanRead(data);
+            // An item dragged from another list counts only for what it carries (file, link, app)
+            return IsOwnDrag(data) || DropReader.CanRead(data);
         }
         catch (COMException)
         {
@@ -1075,10 +1388,17 @@ public partial class PopupWindow : Window
         }
     }
 
-    static DragDropEffects EffectFor(DragEventArgs e)
+    /// <summary>Our own item being moved (the drag started in this window), not one from another list.</summary>
+    bool IsOwnDrag(IDataObject data) => _draggingId != null && data.GetDataPresent(InternalDragFormat);
+
+    DragDropEffects EffectFor(DragEventArgs e)
     {
-        if (e.Data.GetDataPresent(InternalDragFormat))
-            return DragDropEffects.Move;
+        // Our own drags offer Link (and Copy for web links) so that Explorer can never move a file:
+        // inside pLaunch any allowed effect means "move the item"
+        if (IsOwnDrag(e.Data))
+            return e.AllowedEffects.HasFlag(DragDropEffects.Move) ? DragDropEffects.Move
+                : e.AllowedEffects.HasFlag(DragDropEffects.Link) ? DragDropEffects.Link
+                : e.AllowedEffects & DragDropEffects.Copy;
         if (e.AllowedEffects.HasFlag(DragDropEffects.Link))
             return DragDropEffects.Link; // a shortcut to the file, never a copy
         return e.AllowedEffects & DragDropEffects.Copy;
@@ -1123,7 +1443,7 @@ public partial class PopupWindow : Window
         SetSpringTarget(null);
         var (index, into) = HitTest(e.GetPosition(List));
 
-        if (e.Data.GetData(InternalDragFormat) is string id)
+        if (IsOwnDrag(e.Data) && e.Data.GetData(InternalDragFormat) is string id)
         {
             if (ItemTree.Find(_root, id) is { } item)
             {
@@ -1165,37 +1485,30 @@ public partial class PopupWindow : Window
     (int Index, ItemViewModel? Into) HitTest(Point position)
     {
         bool rows = _settings.View == ViewMode.List;
-        ItemViewModel? hit = null;
-        Rect hitRect = default;
-        double bottom = double.NegativeInfinity;
+        // Only rows on screen: in a scrolled list the others still have containers (IsVisible is true for
+        // them too), and a drop must never land next to an item the user cannot see
+        var boxes = new List<(ItemViewModel Item, Rect Rect)>(_items.Count);
         for (int i = 0; i < _items.Count; i++)
         {
             if (List.ItemContainerGenerator.ContainerFromIndex(i) is not ListBoxItem container || !container.IsVisible)
                 continue;
             var rect = new Rect(container.TranslatePoint(new Point(0, 0), List), new Size(container.ActualWidth, container.ActualHeight));
-            bottom = Math.Max(bottom, rect.Bottom);
-            // Tiles have 2 px margins: count the gap around each one as part of it
-            var zone = rows ? rect : Rect.Inflate(rect, 2, 2);
-            if (zone.Contains(position))
-            {
-                hit = _items[i];
-                hitRect = rect;
-                break;
-            }
+            if (rect.Bottom > 0 && rect.Top < List.ActualHeight)
+                boxes.Add((_items[i], rect));
         }
+        // Below the visible rows (the footer included) = at the end
+        if (boxes.Count == 0 || position.Y >= List.ActualHeight || position.Y >= boxes.Max(b => b.Rect.Bottom))
+            return (_items.Count, null);
+
+        // Tiles have 2 px margins: count the gap around each one as part of it
+        var (hit, hitRect) = boxes.FirstOrDefault(b => (rows ? b.Rect : Rect.Inflate(b.Rect, 2, 2)).Contains(position));
         if (hit == null)
         {
-            // Below everything, or in a gap: rows compare with the item halves, tiles fall back to the end
-            if (rows && position.Y < bottom)
-            {
-                for (int i = 0; i < _items.Count; i++)
-                {
-                    if (List.ItemContainerGenerator.ContainerFromIndex(i) is ListBoxItem c && c.IsVisible
-                        && position.Y < c.TranslatePoint(new Point(0, 0), List).Y + c.ActualHeight / 2)
-                        return (i, null);
-                }
-            }
-            return (_items.Count, null);
+            // In a gap, e.g. the empty end of an unfinished row of tiles: the closest item on that row
+            // decides (right of the last tile = after it, so still in the same section)
+            var sameRow = boxes.Where(b => position.Y >= b.Rect.Top - 2 && position.Y <= b.Rect.Bottom + 2).ToList();
+            var candidates = sameRow.Count > 0 ? sameRow : boxes;
+            (hit, hitRect) = candidates.MinBy(b => DistanceTo(b.Rect, position));
         }
 
         int index = _items.IndexOf(hit);
@@ -1212,6 +1525,13 @@ public partial class PopupWindow : Window
             ? position.Y > hitRect.Top + hitRect.Height / 2
             : position.X > hitRect.Left + hitRect.Width / 2;
         return (after ? index + 1 : index, null);
+    }
+
+    static double DistanceTo(Rect rect, Point p)
+    {
+        double dx = Math.Max(Math.Max(rect.Left - p.X, 0), p.X - rect.Right);
+        double dy = Math.Max(Math.Max(rect.Top - p.Y, 0), p.Y - rect.Bottom);
+        return Math.Sqrt(dx * dx + dy * dy);
     }
 
     void ShowInsertMarker(int index)
@@ -1294,7 +1614,7 @@ public partial class PopupWindow : Window
         e.Handled = true;
         ResetHeaderHighlight();
         SetSpringTarget(null);
-        if (e.Data.GetData(InternalDragFormat) is string id)
+        if (IsOwnDrag(e.Data) && e.Data.GetData(InternalDragFormat) is string id)
         {
             if (ItemTree.Find(_root, id) is { } item)
                 MoveToParent(item);
@@ -1331,13 +1651,13 @@ public partial class PopupWindow : Window
 
     bool SafeAutostart()
     {
-        try { return Autostart.IsEnabled; }
+        try { return Autostart.IsEnabled(_profile); }
         catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException) { return false; }
     }
 
     void SetAutostart(bool enabled)
     {
-        try { Autostart.IsEnabled = enabled; }
+        try { Autostart.SetEnabled(_profile, enabled); }
         catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException)
         {
             ShowError("Cannot change the startup setting.", ex.Message);
@@ -1346,8 +1666,9 @@ public partial class PopupWindow : Window
 
     void OpenDataFolder()
     {
-        Directory.CreateDirectory(ItemStore.DefaultDirectory);
-        Process.Start(new ProcessStartInfo(ItemStore.DefaultDirectory) { UseShellExecute = true })?.Dispose();
+        var folder = AppConfig.DataDirectoryPath;
+        Directory.CreateDirectory(folder);
+        Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true })?.Dispose();
         HidePopup();
     }
 
@@ -1359,12 +1680,17 @@ public partial class PopupWindow : Window
             List.Focus();
     }
 
-    static ItemViewModel? ItemAt(object source)
+    static ItemViewModel? ItemAt(object source) => FindAncestor<ListBoxItem>(source)?.DataContext as ItemViewModel;
+
+    static bool IsInScrollBar(object source) => FindAncestor<ScrollBar>(source) != null;
+
+    /// <summary>The element itself or its closest ancestor of type T (visual tree, logical for text runs).</summary>
+    static T? FindAncestor<T>(object source) where T : DependencyObject
     {
         var node = source as DependencyObject;
-        while (node != null && node is not ListBoxItem)
+        while (node != null && node is not T)
             node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node);
-        return (node as ListBoxItem)?.DataContext as ItemViewModel;
+        return node as T;
     }
 
     static T? FindChild<T>(DependencyObject parent) where T : DependencyObject
