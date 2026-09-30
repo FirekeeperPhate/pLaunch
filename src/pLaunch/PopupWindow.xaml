@@ -1,0 +1,120 @@
+<Window x:Class="pLaunch.PopupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:pLaunch.ViewModels"
+        Title="pLaunch"
+        Icon="Assets/pLaunch.ico"
+        Width="320" Height="240"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        ShowInTaskbar="True"
+        Background="Transparent"
+        AllowDrop="True"
+        UseLayoutRounding="True">
+
+    <!-- Client area over the whole window: keeps the DWM shadow, rounded corners and backdrop of a
+         resizable window, while ResizeBorderThickness=0 leaves nothing to resize -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0" ResizeBorderThickness="0" GlassFrameThickness="-1"
+                      CornerRadius="0" UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <DataTemplate x:Key="ItemTemplate" DataType="{x:Type vm:ItemViewModel}">
+            <Grid x:Name="Row" Height="36" Background="Transparent" ToolTip="{Binding ToolTip}"
+                  ToolTipService.InitialShowDelay="900">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Image Width="24" Height="24" Source="{Binding Icon}" RenderOptions.BitmapScalingMode="HighQuality"
+                       Visibility="{Binding HasIcon, Converter={StaticResource BoolToVisibility}}" />
+                <TextBlock x:Name="FallbackGlyph" Width="24" Text="{Binding Glyph}" Style="{StaticResource Glyph}"
+                           FontSize="20" TextAlignment="Center" />
+
+                <TextBlock Grid.Column="1" Margin="12,0,4,0" VerticalAlignment="Center"
+                           Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                <TextBox x:Name="RenameBox" Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center"
+                         Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                         Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibility}}"
+                         KeyDown="RenameBox_KeyDown" LostKeyboardFocus="RenameBox_LostKeyboardFocus" />
+
+                <!-- Insertion markers while dragging -->
+                <Border Grid.ColumnSpan="2" Height="2" Margin="0,-3,0,0" VerticalAlignment="Top" CornerRadius="1"
+                        Background="{DynamicResource AccentFillColorDefaultBrush}"
+                        Visibility="{Binding DropBefore, Converter={StaticResource BoolToVisibility}}" />
+                <Border Grid.ColumnSpan="2" Height="2" Margin="0,0,0,-3" VerticalAlignment="Bottom" CornerRadius="1"
+                        Background="{DynamicResource AccentFillColorDefaultBrush}"
+                        Visibility="{Binding DropAfter, Converter={StaticResource BoolToVisibility}}" />
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding HasIcon}" Value="True">
+                    <Setter TargetName="FallbackGlyph" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsMissing}" Value="True">
+                    <Setter TargetName="Row" Property="Opacity" Value="0.45" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Border x:Name="Root">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <ListBox x:Name="List" Margin="4,6,4,2" Background="Transparent" BorderThickness="0"
+                     ItemTemplate="{StaticResource ItemTemplate}"
+                     IsTextSearchEnabled="True" TextSearch.TextPath="Name"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     VirtualizingPanel.IsVirtualizing="False"
+                     PreviewMouseLeftButtonDown="List_PreviewMouseLeftButtonDown"
+                     PreviewMouseMove="List_PreviewMouseMove"
+                     PreviewMouseLeftButtonUp="List_PreviewMouseLeftButtonUp"
+                     PreviewMouseRightButtonDown="List_PreviewMouseRightButtonDown"
+                     ContextMenuOpening="List_ContextMenuOpening">
+                <ListBox.ItemContainerStyle>
+                    <!-- The Fluent rows are much taller than a menu's -->
+                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                        <Setter Property="Padding" Value="10,0" />
+                        <Setter Property="Margin" Value="0,1" />
+                        <Setter Property="MinHeight" Value="0" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ContextMenu>
+                    <ContextMenu />
+                </ListBox.ContextMenu>
+            </ListBox>
+
+            <StackPanel x:Name="EmptyHint" Margin="24,28,24,24" VerticalAlignment="Center" IsHitTestVisible="False">
+                <TextBlock HorizontalAlignment="Center" Text="&#xE896;" Style="{StaticResource Glyph}" FontSize="28"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Margin="0,12,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           Text="Drag programs, files, folders or links here. You can also drop them on the pLaunch taskbar button." />
+            </StackPanel>
+
+            <Border Grid.Row="1" Padding="6,4" BorderThickness="0,1,0,0"
+                    BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
+                <DockPanel LastChildFill="False">
+                    <Button x:Name="AddButton" DockPanel.Dock="Left" Style="{StaticResource FooterButton}"
+                            ToolTip="Add" Click="AddButton_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE710;" Style="{StaticResource Glyph}" />
+                            <TextBlock Margin="8,0,0,0" Text="Add" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MenuButton" DockPanel.Dock="Right" Style="{StaticResource FooterButton}"
+                            ToolTip="More" Click="MenuButton_Click">
+                        <TextBlock Text="&#xE712;" Style="{StaticResource Glyph}" />
+                    </Button>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
