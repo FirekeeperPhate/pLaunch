@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -6,30 +7,77 @@ using pLaunch.Native;
 
 namespace pLaunch.Services;
 
-/// <summary>Shell icons for launcher items (must be called on an STA thread).</summary>
+/// <summary>
+/// Shell icons for launcher items, extracted off the UI thread: one STA worker for local items and one
+/// for network paths, which can block for the length of an SMB timeout without holding up the others.
+/// </summary>
 public static class IconProvider
 {
-    static readonly Dictionary<(string, int), ImageSource?> Cache = new();
-    static string? _browserPath;
+    static readonly IconWorker Local = new("pLaunch icons");
+    static readonly IconWorker Network = new("pLaunch network icons");
 
-    public static void ClearCache() => Cache.Clear();
-
-    public static ImageSource? Get(LaunchItem item, int pixelSize)
+    /// <summary>The icon, frozen (usable from any thread), or null when the shell has none (yet).</summary>
+    public static Task<ImageSource?> GetAsync(LaunchItem item, int pixelSize)
     {
-        var source = item.Kind == ItemKind.Url ? BrowserPath() : item.Target;
-        if (string.IsNullOrEmpty(source))
-            return null;
-        var key = (source.ToUpperInvariant(), pixelSize);
-        if (!Cache.TryGetValue(key, out var image))
-        {
-            image = Load(source, pixelSize);
-            Cache[key] = image;
-        }
-        return image;
+        var worker = item.Kind is ItemKind.File or ItemKind.Folder && Launcher.IsNetworkPath(item.Target) ? Network : Local;
+        return worker.Enqueue(item.Kind == ItemKind.Url ? null : item.Target, pixelSize);
     }
 
-    /// <summary>The default browser, whose icon stands for web links.</summary>
-    static string? BrowserPath() => _browserPath ??= NativeMethods.GetAssociatedExecutable("https") ?? "";
+    public static void ClearCache()
+    {
+        Local.ClearCache();
+        Network.ClearCache();
+    }
+
+    sealed class IconWorker
+    {
+        readonly BlockingCollection<Action> _queue = new();
+        // Touched only on the worker thread. Failures are not cached: a file that comes back
+        // (drive plugged in again) must get its icon on the next request.
+        readonly Dictionary<(string, int), ImageSource> _cache = new();
+        string? _browserPath;
+
+        public IconWorker(string name)
+        {
+            var thread = new Thread(() =>
+            {
+                foreach (var work in _queue.GetConsumingEnumerable())
+                    work();
+            })
+            { IsBackground = true, Name = name };
+            thread.SetApartmentState(ApartmentState.STA); // shell COM objects
+            thread.Start();
+        }
+
+        /// <summary><paramref name="target"/> null = a web link, shown with the default browser's icon.</summary>
+        public Task<ImageSource?> Enqueue(string? target, int size)
+        {
+            var result = new TaskCompletionSource<ImageSource?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _queue.Add(() =>
+            {
+                try
+                {
+                    var source = target ?? (_browserPath ??= NativeMethods.GetAssociatedExecutable("https") ?? "");
+                    if (source.Length == 0)
+                    {
+                        result.SetResult(null);
+                        return;
+                    }
+                    var key = (source.ToUpperInvariant(), size);
+                    if (!_cache.TryGetValue(key, out var image) && Load(source, size) is { } loaded)
+                        _cache[key] = image = loaded;
+                    result.SetResult(image);
+                }
+                catch (Exception ex) when (ex is COMException or ArgumentException or InvalidOperationException)
+                {
+                    result.SetResult(null);
+                }
+            });
+            return result.Task;
+        }
+
+        public void ClearCache() => _queue.Add(_cache.Clear);
+    }
 
     static BitmapSource? Load(string parsingName, int size)
     {

@@ -189,6 +189,58 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
 
+    // ---- Color dialog ----
+
+    public const int CC_RGBINIT = 0x1;
+    public const int CC_FULLOPEN = 0x2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CHOOSECOLOR
+    {
+        public int lStructSize;
+        public IntPtr hwndOwner;
+        public IntPtr hInstance;
+        public int rgbResult;       // COLORREF 0x00BBGGRR
+        public IntPtr lpCustColors; // COLORREF[16]
+        public int Flags;
+        public IntPtr lCustData;
+        public IntPtr lpfnHook;
+        public IntPtr lpTemplateName;
+    }
+
+    [DllImport("comdlg32.dll", EntryPoint = "ChooseColorW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ChooseColor(ref CHOOSECOLOR cc);
+
+    // Custom colors of the dialog, kept for the session
+    static readonly int[] CustomColors = new int[16];
+
+    /// <summary>The Windows color dialog; null when cancelled.</summary>
+    public static System.Windows.Media.Color? PickColor(IntPtr owner, System.Windows.Media.Color initial)
+    {
+        var custom = Marshal.AllocHGlobal(16 * sizeof(int));
+        try
+        {
+            Marshal.Copy(CustomColors, 0, custom, 16);
+            var cc = new CHOOSECOLOR
+            {
+                lStructSize = Marshal.SizeOf<CHOOSECOLOR>(),
+                hwndOwner = owner,
+                rgbResult = initial.R | initial.G << 8 | initial.B << 16,
+                lpCustColors = custom,
+                Flags = CC_RGBINIT | CC_FULLOPEN,
+            };
+            if (!ChooseColor(ref cc))
+                return null;
+            Marshal.Copy(custom, CustomColors, 0, 16);
+            return System.Windows.Media.Color.FromRgb((byte)cc.rgbResult, (byte)(cc.rgbResult >> 8), (byte)(cc.rgbResult >> 16));
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(custom);
+        }
+    }
+
     // ---- File associations ----
 
     public const int ASSOCSTR_EXECUTABLE = 2;

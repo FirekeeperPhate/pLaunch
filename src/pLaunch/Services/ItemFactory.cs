@@ -55,15 +55,39 @@ public static class ItemFactory
         return new LaunchItem { Kind = ItemKind.Shell, Target = target, Name = name };
     }
 
+    static readonly HashSet<string> WebSchemes = new(StringComparer.OrdinalIgnoreCase) { "http", "https", "ftp", "mailto" };
+
+    /// <summary>
+    /// Whether Windows has a handler for a URI scheme (HKCR\&lt;scheme&gt; with a "URL Protocol" value).
+    /// Replaceable in tests.
+    /// </summary>
+    internal static Func<string, bool> IsRegisteredProtocol { get; set; } = scheme =>
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(scheme);
+            return key?.GetValue("URL Protocol") != null;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            return false;
+        }
+    };
+
+    /// <summary>
+    /// A link to keep: no whitespace (so "Note: buy milk" is text, not a "note:" URI) and a scheme that
+    /// is either a web one or registered with Windows (ms-settings:, steam://, ...).
+    /// </summary>
     public static bool TryParseUrl(string text, out Uri uri)
     {
         text = text.Trim();
         if (text.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
             text = "https://" + text;
-        if (Uri.TryCreate(text, UriKind.Absolute, out uri!)
+        if (!text.Any(char.IsWhiteSpace)
+            && Uri.TryCreate(text, UriKind.Absolute, out uri!)
             && !uri.IsFile && !uri.IsUnc
             && uri.Scheme.Length > 1 // "c:" parses as a scheme
-            && !text.Contains('\n'))
+            && (WebSchemes.Contains(uri.Scheme) || IsRegisteredProtocol(uri.Scheme)))
         {
             return true;
         }

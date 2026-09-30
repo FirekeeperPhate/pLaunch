@@ -17,7 +17,11 @@ public static class Program
         using var instance = new SingleInstance();
         if (!instance.IsPrimary)
         {
-            instance.SendToPrimary(options.Items);
+            // A duplicate autostart (e.g. two Run entries) has nothing to ask: opening the popup at logon would be wrong
+            if (options.Minimized && options.Items.Count == 0)
+                return 0;
+            // Relative paths belong to this process's current folder, not the running instance's
+            instance.SendToPrimary(options.Items.Select(ToAbsolute).ToList());
             return 0;
         }
 
@@ -26,10 +30,23 @@ public static class Program
         return app.Run();
     }
 
+    internal static string ToAbsolute(string argument)
+    {
+        var path = argument.Trim().Trim('"');
+        try
+        {
+            return File.Exists(path) || Directory.Exists(path) ? Path.GetFullPath(path) : argument;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return argument;
+        }
+    }
+
     static int LaunchById(string id)
     {
-        var item = ItemStore.CreateDefault().Load().FirstOrDefault(i => i.Id == id);
-        if (item == null)
+        var item = ItemTree.Find(ItemStore.CreateDefault().Load().Items, id);
+        if (item is not { IsLaunchable: true })
             return 1;
         try
         {

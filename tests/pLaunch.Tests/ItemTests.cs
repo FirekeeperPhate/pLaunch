@@ -22,8 +22,8 @@ public sealed class ItemTests : IDisposable
             new() { Kind = ItemKind.Url, Name = "Example", Target = "https://example.com/" },
             new() { Kind = ItemKind.Shell, Name = "Calculator", Target = @"shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", Arguments = "x" },
         };
-        store.Save(items);
-        var loaded = store.Load();
+        store.Save(items, new LauncherSettings());
+        var loaded = store.Load().Items;
         Assert.Equal(3, loaded.Count);
         for (int i = 0; i < items.Count; i++)
         {
@@ -37,7 +37,7 @@ public sealed class ItemTests : IDisposable
     [Fact]
     public void Store_MissingFile_IsEmpty()
     {
-        Assert.Empty(new ItemStore(Path.Combine(_dir, "none.json")).Load());
+        Assert.Empty(new ItemStore(Path.Combine(_dir, "none.json")).Load().Items);
     }
 
     [Fact]
@@ -45,9 +45,28 @@ public sealed class ItemTests : IDisposable
     {
         var path = Path.Combine(_dir, "items.json");
         File.WriteAllText(path, "{ not json");
-        Assert.Empty(new ItemStore(path).Load());
+        Assert.Empty(new ItemStore(path).Load().Items);
         Assert.True(File.Exists(path + ".bad"));
         Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void Store_LockedFile_StartsEmptyAndNeverOverwritesIt()
+    {
+        var path = Path.Combine(_dir, "items.json");
+        var store = new ItemStore(path) { ReadAttempts = 2 };
+        store.Save([new LaunchItem { Kind = ItemKind.Url, Name = "Keep me", Target = "https://example.com/" }], new LauncherSettings());
+        var original = File.ReadAllText(path);
+
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.Empty(store.Load().Items);
+            Assert.NotNull(store.LoadError);
+            Assert.Throws<IOException>(() => store.Save([], new LauncherSettings()));
+        }
+        Assert.Equal(original, File.ReadAllText(path));
+        Assert.Single(store.Load().Items); // readable again: back to normal
+        Assert.Null(store.LoadError);
     }
 
     [Fact]
@@ -97,6 +116,33 @@ public sealed class ItemTests : IDisposable
         Assert.Null(ItemFactory.FromUrl(text));
     }
 
+    [Theory]
+    [InlineData("Note: buy milk")]    // whitespace: text, not a "note:" URI
+    [InlineData("Re: meeting")]
+    [InlineData("todo:call-bob")]     // unregistered scheme
+    [InlineData("https://exa mple.com")]
+    public void FromUrl_RejectsPlainText(string text)
+    {
+        var saved = ItemFactory.IsRegisteredProtocol;
+        ItemFactory.IsRegisteredProtocol = _ => false;
+        try { Assert.Null(ItemFactory.FromUrl(text)); }
+        finally { ItemFactory.IsRegisteredProtocol = saved; }
+    }
+
+    [Fact]
+    public void FromUrl_AcceptsRegisteredProtocols()
+    {
+        var saved = ItemFactory.IsRegisteredProtocol;
+        ItemFactory.IsRegisteredProtocol = scheme => scheme == "ms-settings";
+        try
+        {
+            Assert.Equal(ItemKind.Url, ItemFactory.FromUrl("ms-settings:display")!.Kind);
+            Assert.Null(ItemFactory.FromUrl("unknown:thing"));
+            Assert.NotNull(ItemFactory.FromUrl("https://example.com")); // web schemes need no registry
+        }
+        finally { ItemFactory.IsRegisteredProtocol = saved; }
+    }
+
     [Fact]
     public void FromUrl_UsesTheTitle()
     {
@@ -138,6 +184,43 @@ public sealed class ItemTests : IDisposable
         Assert.True(cl.Minimized);
         Assert.Equal("abc", cl.LaunchId);
         Assert.Equal([@"C:\a.txt", "https://x.org"], cl.Items);
+    }
+
+    [Theory]
+    [InlineData("\"C:\\Program Files\\pLaunch\\pLaunch.exe\" --minimized", @"C:\Program Files\pLaunch\pLaunch.exe")]
+    [InlineData(@"C:\Tools\pLaunch.exe --minimized", @"C:\Tools\pLaunch.exe")]
+    [InlineData(@"C:\Tools\pLaunch.exe", @"C:\Tools\pLaunch.exe")]
+    public void Autostart_ReadsTheExeOfARunCommand(string command, string exe)
+    {
+        Assert.Equal(exe, Autostart.ExePath(command));
+    }
+
+    [Fact]
+    public void ForwardedArguments_AreMadeAbsolute()
+    {
+        File.WriteAllText(Path.Combine(_dir, "doc.txt"), "");
+        var saved = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = _dir;
+            Assert.Equal(Path.Combine(_dir, "doc.txt"), Program.ToAbsolute("doc.txt"));
+            Assert.Equal("missing.txt", Program.ToAbsolute("missing.txt"));
+            Assert.Equal("https://example.com", Program.ToAbsolute("https://example.com"));
+        }
+        finally
+        {
+            Environment.CurrentDirectory = saved;
+        }
+    }
+
+    [Theory]
+    [InlineData(@"\\server\share\tool.exe", true)]
+    [InlineData(@"C:\Windows\notepad.exe", false)]
+    [InlineData("https://example.com", false)]
+    [InlineData(@"shell:AppsFolder\x", false)]
+    public void NetworkPaths_AreRecognized(string path, bool expected)
+    {
+        Assert.Equal(expected, Launcher.IsNetworkPath(path));
     }
 
     [Fact]

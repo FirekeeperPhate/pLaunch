@@ -7,11 +7,15 @@ namespace pLaunch.Services;
 
 /// <summary>
 /// One pLaunch per user session. A second start forwards its request to the running instance
-/// through a named pipe: "show" (open the popup) or the paths/URLs to add.
+/// through a named pipe: nothing (open the popup) or the paths/URLs to add.
 /// </summary>
 public sealed class SingleInstance : IDisposable
 {
+    /// <summary>Held while pLaunch runs: the installer (AppMutex) asks to close it first.</summary>
+    const string RunningMutexName = "pLaunch.Running";
+
     readonly Mutex _mutex;
+    readonly Mutex? _running;
     readonly string _pipeName;
     CancellationTokenSource? _cts;
 
@@ -22,6 +26,8 @@ public sealed class SingleInstance : IDisposable
         var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
         _mutex = new Mutex(true, $@"Local\pLaunch-{sid}", out bool created);
         IsPrimary = created;
+        if (created)
+            _running = new Mutex(false, RunningMutexName);
         using var process = System.Diagnostics.Process.GetCurrentProcess();
         _pipeName = $"pLaunch-{sid}-{process.SessionId}"; // pipes are machine-wide, the Local\ mutex is per session
     }
@@ -78,6 +84,7 @@ public sealed class SingleInstance : IDisposable
     public void Dispose()
     {
         _cts?.Cancel();
+        _running?.Dispose();
         if (IsPrimary)
             _mutex.ReleaseMutex();
         _mutex.Dispose();

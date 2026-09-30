@@ -22,9 +22,30 @@ public static class Launcher
     /// <summary>True when the file or folder is known to be gone. Network paths are not probed (they can hang).</summary>
     public static bool IsMissing(LaunchItem item)
     {
-        if (item.Kind is not (ItemKind.File or ItemKind.Folder) || item.Target.StartsWith(@"\\", StringComparison.Ordinal))
+        if (item.Kind is not (ItemKind.File or ItemKind.Folder) || IsNetworkPath(item.Target))
             return false;
         return item.Kind == ItemKind.File ? !File.Exists(item.Target) : !Directory.Exists(item.Target);
+    }
+
+    /// <summary>
+    /// UNC paths and mapped network drives: touching them can block for the length of an SMB timeout.
+    /// GetDriveType (behind DriveInfo.DriveType) only reads the drive table, so it answers at once even
+    /// for a disconnected drive.
+    /// </summary>
+    public static bool IsNetworkPath(string path)
+    {
+        if (path.StartsWith(@"\\", StringComparison.Ordinal))
+            return true;
+        if (path.Length < 2 || path[1] != ':' || !char.IsAsciiLetter(path[0]))
+            return false;
+        try
+        {
+            return new DriveInfo(path[..1]).DriveType == DriveType.Network;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Starts the item; returns false when the user cancelled an elevation prompt.</summary>
@@ -42,7 +63,9 @@ public static class Launcher
         else
         {
             psi = new ProcessStartInfo(item.Target) { UseShellExecute = true, Arguments = item.Arguments ?? "" };
-            if (item.Kind == ItemKind.File && Path.GetExtension(item.Target).Equals(".exe", StringComparison.OrdinalIgnoreCase))
+            // Start in the target's folder, like the old Quick Launch shortcuts: scripts (.bat, .cmd)
+            // and many programs use relative paths. A .lnk keeps its own "Start in" if it has one.
+            if (item.Kind == ItemKind.File)
                 psi.WorkingDirectory = Path.GetDirectoryName(item.Target) ?? "";
             if (asAdmin)
                 psi.Verb = "runas";

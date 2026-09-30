@@ -15,10 +15,17 @@ using System.Windows.Media.Imaging;
 //   dotnet run tools/MakeIcon.cs                                  -> writes the .ico
 //   dotnet run tools/MakeIcon.cs -- --preview preview.png         -> also writes a preview sheet
 //   dotnet run tools/MakeIcon.cs -- --large 1.28 --small 1.40     -> logo scale of each variant
+//   dotnet run tools/MakeIcon.cs -- --lighten 1.6                 -> panel brightness (1 = artwork)
+//   dotnet run tools/MakeIcon.cs -- --frame-gray 1.6              -> gray frame level (0 = purple, see --frame-lighten)
+//   dotnet run tools/MakeIcon.cs -- --output other.ico            -> write elsewhere
 string input = Path.Combine("tools", "icon-source.jpg");
 string output = Path.Combine("src", "pLaunch", "Assets", "pLaunch.ico");
 string? previewPath = null;
 double largeScale = 1.28, smallScale = 1.40;
+// Brightness of the blue panel and of the purple frame (1 = as in the artwork); multiplying keeps the hue
+double lighten = 1.6, frameLighten = 1.7;
+// Frame in neutral gray: its luminance (shading and inner line kept) times this; 0 = keep the purple
+double frameGray = 1.6;
 for (int a = 0; a + 1 < args.Length; a += 2)
 {
     var value = args[a + 1];
@@ -28,6 +35,10 @@ for (int a = 0; a + 1 < args.Length; a += 2)
         case "--large": largeScale = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
         case "--small": smallScale = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
         case "--input": input = value; break;
+        case "--output": output = value; break;
+        case "--lighten": lighten = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
+        case "--frame-lighten": frameLighten = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
+        case "--frame-gray": frameGray = double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); break;
     }
 }
 
@@ -40,6 +51,15 @@ int R(int i) => px[i * 4 + 2];
 int G(int i) => px[i * 4 + 1];
 int B(int i) => px[i * 4];
 double Lum(int i) => 0.299 * R(i) + 0.587 * G(i) + 0.114 * B(i);
+
+// The frame's color from an artwork frame color: neutral gray (frameGray > 0) or brighter purple
+(double B, double G, double R) FrameColor(double b, double g, double r)
+{
+    if (frameGray <= 0)
+        return (b * frameLighten, g * frameLighten, r * frameLighten);
+    double v = (0.299 * r + 0.587 * g + 0.114 * b) * frameGray;
+    return (v, v, v);
+}
 
 // ---- 1. the dark-blue panel (flood fill over bluish pixels) and the area inside the inner purple line
 var panel = FloodFill(400 * W + 400, i => R(i) - G(i) < 8 && B(i) > R(i) + 10);
@@ -181,7 +201,7 @@ double panelCx = (pMinX + pMaxX) / 2.0, panelCy = (pMinY + pMaxY) / 2.0;
 {
     double sx = logoCx + (x - panelCx) / k, sy = logoCy + (y - panelCy) / k;
     double s = Sample(shadow, sx, sy, 1f);
-    double bb = Grad(0, x, y) * s, gg = Grad(1, x, y) * s, rr = Grad(2, x, y) * s;
+    double bb = Grad(0, x, y) * s * lighten, gg = Grad(1, x, y) * s * lighten, rr = Grad(2, x, y) * s * lighten;
     double a = Sample(logo[3], sx, sy, 0f);
     if (a > 0)
     {
@@ -230,6 +250,11 @@ for (int x = 0; x < W; x++)
     {
         var (b, g, r) = PanelAt(x, y, largeScale);
         large[i * 4] = Dither(b); large[i * 4 + 1] = Dither(g); large[i * 4 + 2] = Dither(r);
+    }
+    else if (!outside[i])
+    {
+        var (fb, fg, fr) = FrameColor(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]);
+        large[i * 4] = Dither(fb); large[i * 4 + 1] = Dither(fg); large[i * 4 + 2] = Dither(fr);
     }
     if (outside[i]) large[i * 4 + 3] = 0;
 }
@@ -286,9 +311,10 @@ for (int x = 0; x < S; x++)
         if (RoundedDistance(fx, fy, margin + frame, margin + frame, S - margin - frame, S - margin - frame, innerR) > 0)
         {
             double t = fy / S;
-            b = frameTop.B + (frameBottom.B - frameTop.B) * t;
-            g = frameTop.G + (frameBottom.G - frameTop.G) * t;
-            r = frameTop.R + (frameBottom.R - frameTop.R) * t;
+            (b, g, r) = FrameColor(
+                frameTop.B + (frameBottom.B - frameTop.B) * t,
+                frameTop.G + (frameBottom.G - frameTop.G) * t,
+                frameTop.R + (frameBottom.R - frameTop.R) * t);
         }
         else
         {
