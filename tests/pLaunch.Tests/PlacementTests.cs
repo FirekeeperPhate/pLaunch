@@ -83,4 +83,27 @@ public class PlacementTests
         var (_, y) = PopupPlacement.Compute(area, ScreenEdge.Left, 30, 200, 480, 600, 18);
         Assert.Equal(18, y);
     }
+
+    // A menu to the right of the list, from y 100 to 700, its near edge at x 500
+    static readonly PixelRect RightMenu = new(500, 100, 980, 700);
+
+    [Theory]
+    [InlineData(300, 400, 340, 420, true)]   // towards the menu, a bit downwards: still inside the triangle
+    [InlineData(300, 400, 340, 350, true)]   // towards the menu, upwards (the top corner allows y >= 340 here)
+    [InlineData(300, 400, 300, 440, false)]  // straight down: another row is meant
+    [InlineData(300, 400, 260, 400, false)]  // away from the menu
+    [InlineData(300, 400, 300, 400, false)]  // not moving: resting on the row
+    [InlineData(300, 400, 340, 700, false)]  // much steeper than the menu's bottom corner
+    public void HeadingForAnOpenMenu_IsTheTriangleToItsNearEdge(int fromX, int fromY, int toX, int toY, bool heading)
+    {
+        Assert.Equal(heading, PopupPlacement.IsHeadingFor((fromX, fromY), (toX, toY), RightMenu));
+    }
+
+    [Fact]
+    public void HeadingForAMenuOnTheLeft_UsesItsRightEdge()
+    {
+        var leftMenu = new PixelRect(0, 100, 480, 700);
+        Assert.True(PopupPlacement.IsHeadingFor((700, 400), (660, 410), leftMenu));
+        Assert.False(PopupPlacement.IsHeadingFor((700, 400), (740, 410), leftMenu));
+    }
 }

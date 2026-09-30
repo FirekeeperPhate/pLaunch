@@ -16,7 +16,10 @@ namespace pLaunch;
 // sub-folders cascading on hover like the menus of the old Quick Launch
 public partial class PopupWindow
 {
-    static readonly TimeSpan MenuHoverDelay = TimeSpan.FromMilliseconds(350);
+    // Resting this long on a row is enough: sub-folders open (and other rows close them) almost at once
+    static readonly TimeSpan MenuHoverDelay = TimeSpan.FromMilliseconds(50);
+    // While the mouse heads for an open menu, the rows it crosses wait: at most this many delays
+    const int MaxHoverPostpones = 8;
     const double MenuGapDip = 2;
     const double MenuListTopDip = 6; // the menu list's top margin: its first row lines up with the folder's row
 
@@ -25,6 +28,8 @@ public partial class PopupWindow
     DispatcherTimer? _menuHoverTimer;
     // The row under the mouse and where it is: 0 = the popup's list, n = the n-th menu
     (ItemViewModel? Item, int Level) _menuHover;
+    NativeMethods.POINT _hoverFrom; // where the mouse was when it reached that row (or at the last delay)
+    int _hoverPostpones;
     (ItemViewModel Item, FolderMenu Menu)? _menuPressed;
     Point _menuPressPoint;
     bool _menuDragAcceptable;
@@ -56,8 +61,9 @@ public partial class PopupWindow
     bool IsMenuOpen(ItemViewModel folder, int level) => _menus.Count > level && _menus[level].Opener == folder;
 
     /// <summary>
-    /// A click (or Enter) on a sub-folder or live folder: its menu opens beside its row; a second click
-    /// closes it. From the keyboard the menu's first item is selected, ready for the arrows.
+    /// A click (or Enter) on a sub-folder or live folder: its menu opens beside its row. Resting the
+    /// mouse on it has usually opened it already: a click keeps it open. From the keyboard the menu's
+    /// first item is selected, ready for the arrows.
     /// </summary>
     void ToggleMenu(ItemViewModel folder, int level)
     {
@@ -68,8 +74,6 @@ public partial class PopupWindow
         {
             if (keyboard)
                 MoveMenuSelection(_menus[level], +1);
-            else
-                CloseMenus(level);
             return;
         }
         OpenMenu(folder, level, selectFirst: keyboard);
@@ -288,15 +292,16 @@ public partial class PopupWindow
     }
 
     /// <summary>
-    /// The row under the mouse. In a menu, resting on a sub-folder opens it and resting on anything else
-    /// closes the menus after it; in the popup's list the same happens only while a menu is open (a
-    /// click opens the first one).
+    /// The row under the mouse, in the popup's list or in a menu: resting on a sub-folder opens its menu,
+    /// resting on anything else closes the menus after that list.
     /// </summary>
     void ScheduleMenuHover(ItemViewModel? item, int level)
     {
         if (!MenuMode || (item == _menuHover.Item && level == _menuHover.Level))
             return;
         _menuHover = (item, level);
+        NativeMethods.GetCursorPos(out _hoverFrom);
+        _hoverPostpones = 0;
         if (_menuHoverTimer == null)
         {
             _menuHoverTimer = new DispatcherTimer { Interval = MenuHoverDelay };
@@ -314,8 +319,15 @@ public partial class PopupWindow
     void MenuHoverElapsed()
     {
         var (item, level) = _menuHover;
-        if (item == null || !IsShownAt(item, level) || (level == 0 && _menus.Count == 0))
+        if (item == null || !IsShownAt(item, level))
             return;
+        // On the way to the open menu (diagonally, over other rows): those rows wait a little longer
+        if (_menus.Count > level && !IsMenuOpen(item, level) && _hoverPostpones < MaxHoverPostpones && IsHeadingFor(_menus[level]))
+        {
+            _hoverPostpones++;
+            _menuHoverTimer!.Start();
+            return;
+        }
         if (item.IsNavigable)
         {
             if (!IsMenuOpen(item, level))
@@ -325,6 +337,16 @@ public partial class PopupWindow
         {
             CloseMenus(level);
         }
+    }
+
+    /// <summary>Whether the mouse moved towards <paramref name="menu"/> since the row was reached (or since the last check).</summary>
+    bool IsHeadingFor(FolderMenu menu)
+    {
+        if (!NativeMethods.GetCursorPos(out var now) || !NativeMethods.GetWindowRect(menu.Handle, out var rect))
+            return false;
+        var from = _hoverFrom;
+        _hoverFrom = now;
+        return PopupPlacement.IsHeadingFor((from.X, from.Y), (now.X, now.Y), rect.ToPixelRect());
     }
 
     void MenuMouseDown(FolderMenu menu, MouseButtonEventArgs e)

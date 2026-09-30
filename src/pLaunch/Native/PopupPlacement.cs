@@ -76,4 +76,26 @@ public static class PopupPlacement
 
     // Math.Clamp throws when min > max (popup larger than the area): prefer the top/left edge then
     static int Clamp(int value, int min, int max) => Math.Max(min, Math.Min(value, max));
+
+    /// <summary>
+    /// Whether the pointer, moving from <paramref name="from"/> to <paramref name="to"/>, is on its way
+    /// to an open menu: <paramref name="to"/> lies in the triangle between <paramref name="from"/> and
+    /// the menu's near edge. Crossing other rows on the way there must not close the menu.
+    /// </summary>
+    public static bool IsHeadingFor((int X, int Y) from, (int X, int Y) to, PixelRect menu)
+    {
+        if (from == to)
+            return false; // resting on a row: that row is meant
+        int edge = menu.Left >= from.X ? menu.Left : menu.Right;
+        return InTriangle(to, from, (edge, menu.Top), (edge, menu.Bottom));
+    }
+
+    static bool InTriangle((int X, int Y) p, (int X, int Y) a, (int X, int Y) b, (int X, int Y) c)
+    {
+        static long Side((int X, int Y) p, (int X, int Y) q, (int X, int Y) r) =>
+            (long)(p.X - r.X) * (q.Y - r.Y) - (long)(q.X - r.X) * (p.Y - r.Y);
+        long d1 = Side(p, a, b), d2 = Side(p, b, c), d3 = Side(p, c, a);
+        bool negative = d1 < 0 || d2 < 0 || d3 < 0, positive = d1 > 0 || d2 > 0 || d3 > 0;
+        return !(negative && positive);
+    }
 }

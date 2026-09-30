@@ -27,8 +27,8 @@ shortcuts (programs, files, folders, web links, Store apps).
 - **Right click** an item: open, run as administrator, open file location, rename, remove, and add a
   sub-folder or a separator right after it. Drag items to reorder them.
 - **Sub-folders** (Add → New sub-folder) open in a **menu beside the list**, as tall as their content,
-  like the old Quick Launch menus: resting the mouse on a sub-folder inside a menu opens the next one,
-  on anything else closes it; arrows, Right/Enter and Left/Esc work too. Right click in a menu: open,
+  like the old Quick Launch menus: just pointing at a sub-folder opens its menu (no click needed), pointing
+  at anything else closes it, and moving the mouse towards an open menu across other rows keeps it open; arrows, Right/Enter and Left/Esc work too. Right click in a menu: open,
   rename, remove, properties, new folder or separator. Drop an item on a sub-folder to move it in, or into
   its menu at a precise spot; holding a drag over a sub-folder opens it. In Settings they can open
   **inside the list** instead, with a back button (drop on it to move an item up one level).
