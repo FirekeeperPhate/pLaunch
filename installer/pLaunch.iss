@@ -44,6 +44,9 @@ OutputDir=Output
 OutputBaseFilename=pLaunch-Setup-{#AppVersion}-{#Flavor}
 SetupIconFile=..\src\pLaunch\Assets\pLaunch.ico
 UninstallDisplayIcon={app}\{#AppExe}
+; Tells the shell at the end that icons changed (SHChangeNotify SHCNE_ASSOCCHANGED): after an upgrade
+; with a new program icon, shortcuts and pinned buttons would otherwise keep the cached old one
+ChangesAssociations=yes
 UninstallDisplayName={#AppName} ({#Flavor})
 WizardStyle=modern dynamic
 Compression=lzma2/ultra64

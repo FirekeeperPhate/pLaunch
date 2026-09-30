@@ -28,7 +28,9 @@ public partial class PopupWindow
     DispatcherTimer? _menuHoverTimer;
     // The row under the mouse and where it is: 0 = the popup's list, n = the n-th menu
     (ItemViewModel? Item, int Level) _menuHover;
+    TimeSpan _menuHoverWait; // how long the current row has to be rested on (a drag waits longer)
     NativeMethods.POINT _hoverFrom; // where the mouse was when it reached that row (or at the last delay)
+    NativeMethods.POINT? _pointerAtOpen; // where the pointer was when the popup opened, until it moves
     int _hoverPostpones;
     (ItemViewModel Item, FolderMenu Menu)? _menuPressed;
     Point _menuPressPoint;
@@ -73,7 +75,10 @@ public partial class PopupWindow
         if (IsMenuOpen(folder, level))
         {
             if (keyboard)
+            {
+                _menus[level].KeyboardActive = true; // opened by the mouse: now the keys go into it
                 MoveMenuSelection(_menus[level], +1);
+            }
             return;
         }
         OpenMenu(folder, level, selectFirst: keyboard);
@@ -105,7 +110,7 @@ public partial class PopupWindow
         menu.Resources["GlyphSize"] = Math.Round(metrics.IconSize * 0.85);
         menu.Resources["RowHeight"] = metrics.RowHeight;
         menu.List.ItemsPanel = (ItemsPanelTemplate)Resources["StackPanelTemplate"];
-        menu.List.ItemContainerStyle = (Style)Resources["ListContainer"];
+        menu.UseRowStyle((Style)Resources["ListContainer"]); // the popup's rows, never focusable
         menu.List.ItemTemplateSelector = new ItemTemplateChooser(Resources, ViewMode.List);
         HookMenu(menu);
         _menus.Add(menu);
@@ -124,7 +129,10 @@ public partial class PopupWindow
         // The folder it came from stays highlighted while its menu is open
         ListAt(level).SelectedItem = folder;
         if (selectFirst)
+        {
+            menu.KeyboardActive = true;
             MoveMenuSelection(menu, +1);
+        }
     }
 
     /// <summary>Closes the menus from the <paramref name="from"/>-th one on (0 = all of them).</summary>
@@ -155,7 +163,9 @@ public partial class PopupWindow
         menu.EmptyText.Visibility = menu.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         menu.Root.Background = Root.Background;
         QueueIconLoad(menu.Items);
-        MarkRunning(menu.Items.ToList()); // rows that came in (a drop, a live folder read) get their running line too
+        // Rows that came in (a drop, a live folder read) get their running line too; menus opened one after
+        // another while the pointer moves share a recent look at the windows
+        MarkRunning(menu.Items.ToList(), reuse: TimeSpan.FromMilliseconds(500));
     }
 
     /// <summary>After any change: every menu shows its folder again, or closes when the folder is gone.</summary>
@@ -295,11 +305,18 @@ public partial class PopupWindow
     /// The row under the mouse, in the popup's list or in a menu: resting on a sub-folder opens its menu,
     /// resting on anything else closes the menus after that list.
     /// </summary>
-    void ScheduleMenuHover(ItemViewModel? item, int level)
+    void ScheduleMenuHover(ItemViewModel? item, int level, TimeSpan? delay = null)
     {
-        if (!MenuMode || (item == _menuHover.Item && level == _menuHover.Level))
+        var wait = delay ?? MenuHoverDelay;
+        // The same row again: nothing new, unless the wait changed (a drag's long one, then plain pointing)
+        if (!MenuMode || (item == _menuHover.Item && level == _menuHover.Level && wait == _menuHoverWait))
+            return;
+        // The popup opened under a pointer that has not moved yet (the shortcut places it at the pointer):
+        // the row that happens to be there was not pointed at
+        if (level == 0 && PointerStillSinceOpen())
             return;
         _menuHover = (item, level);
+        _menuHoverWait = wait;
         NativeMethods.GetCursorPos(out _hoverFrom);
         _hoverPostpones = 0;
         if (_menuHoverTimer == null)
@@ -312,8 +329,26 @@ public partial class PopupWindow
             };
         }
         _menuHoverTimer.Stop();
+        _menuHoverTimer.Interval = wait;
         if (item != null)
             _menuHoverTimer.Start();
+    }
+
+    /// <summary>Called when the popup opens: rows under the still pointer do not count as pointed at.</summary>
+    void RememberPointerAtOpen() => _pointerAtOpen = NativeMethods.GetCursorPos(out var p) ? p : null;
+
+    /// <summary>
+    /// True while the pointer is where it was when the popup opened. Any real movement ends it for good
+    /// (the popup and every menu call this on mouse moves), even if the pointer later comes back there.
+    /// </summary>
+    bool PointerStillSinceOpen()
+    {
+        if (_pointerAtOpen is not { } still)
+            return false;
+        if (NativeMethods.GetCursorPos(out var now) && now.X == still.X && now.Y == still.Y)
+            return true;
+        _pointerAtOpen = null;
+        return false;
     }
 
     void MenuHoverElapsed()
@@ -360,6 +395,7 @@ public partial class PopupWindow
 
     void MenuMouseMove(FolderMenu menu, MouseEventArgs e)
     {
+        PointerStillSinceOpen(); // a move in a menu is a real move
         if (e.LeftButton != MouseButtonState.Pressed || _menuPressed is not { } pressed || pressed.Menu != menu)
         {
             ScheduleMenuHover(ItemAt(e.OriginalSource), _menus.IndexOf(menu) + 1);
@@ -412,48 +448,49 @@ public partial class PopupWindow
     /// </summary>
     bool HandleMenuKey(KeyEventArgs e)
     {
-        var menu = _menus[^1];
-        int level = _menus.Count;
-        var selected = menu.List.SelectedItem as ItemViewModel;
         bool alt = e.Key == Key.System;
         var key = alt ? e.SystemKey : e.Key;
+        // The deepest menu the keyboard works in; menus the mouse opened leave the keys to their list
+        int target = _menus.FindLastIndex(m => m.KeyboardActive);
+        if (target < 0)
+        {
+            if (key != Key.Escape)
+                return false;
+            CloseMenus(); // Esc closes what the mouse opened, before closing the popup
+            return true;
+        }
         // Typing in the search box: only the keys that move in the menu go to it (the others edit the text)
         if (SearchBox.IsKeyboardFocusWithin && key is not (Key.Down or Key.Up or Key.Enter or Key.Escape))
             return false;
-        // The keyboard takes over: a hover still pending must not close what the keys open
-        _menuHoverTimer?.Stop();
-        switch (key)
+        var menu = _menus[target];
+        int level = target + 1;
+        var selected = menu.List.SelectedItem as ItemViewModel;
+        bool editable = selected is { IsSeparator: false } && !selected.Model.IsLive;
+        // What the key does in that menu; null = not a menu key (modifiers pressed alone, Tab, letters...)
+        Action? action = key switch
         {
-            case Key.Enter when alt: // Alt+Enter: properties (before the plain Enter cases)
-                if (selected is { IsSeparator: false } && !selected.Model.IsLive)
-                    ShowProperties(selected);
-                return true;
-            case Key.Down when !alt:
-                MoveMenuSelection(menu, +1);
-                return true;
-            case Key.Up when !alt:
-                MoveMenuSelection(menu, -1);
-                return true;
-            case Key.Right when !alt && selected is { IsNavigable: true }:
-            case Key.Enter when selected is { IsNavigable: true }:
-                OpenMenu(selected, level, selectFirst: true);
-                return true;
-            case Key.Enter when selected is { IsSeparator: false }:
-                Open(selected, asAdmin: Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && Launcher.CanRunAsAdmin(selected.Model));
-                return true;
-            case Key.Left when !alt:
-            case Key.Escape:
-                CloseMenus(_menus.Count - 1);
-                return true;
-            case Key.F2 when selected is { IsSeparator: false } && !selected.Model.IsLive:
-                RenameByPrompt(selected);
-                return true;
-            case Key.Delete when selected != null && !selected.Model.IsLive:
-                Remove(selected);
-                return true;
-            default:
-                return false;
-        }
+            Key.Enter when alt => () => { if (editable) ShowProperties(selected!); }, // Alt+Enter, before plain Enter
+            Key.Down when !alt => () => MoveMenuSelection(menu, +1),
+            Key.Up when !alt => () => MoveMenuSelection(menu, -1),
+            Key.Right when !alt && selected is { IsNavigable: true } => () => OpenMenu(selected, level, selectFirst: true),
+            Key.Right when !alt => () => { }, // on a program or file: nothing (the list must not reopen the menu)
+            Key.Enter when selected is { IsNavigable: true } => () => OpenMenu(selected, level, selectFirst: true),
+            Key.Enter when selected is { IsSeparator: false } => () =>
+                Open(selected, asAdmin: Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && Launcher.CanRunAsAdmin(selected.Model)),
+            Key.Left when !alt => () => CloseMenus(target),
+            Key.Escape => () => CloseMenus(target),
+            Key.F2 when editable => () => RenameByPrompt(selected!),
+            Key.Delete when selected != null && !selected.Model.IsLive => () => Remove(selected),
+            _ => null,
+        };
+        if (action == null)
+            return false;
+        // The keyboard takes over: a hover still pending must not close what the keys open, and menus the
+        // mouse opened past the keyboard's one go away
+        _menuHoverTimer?.Stop();
+        CloseMenus(target + 1);
+        action();
+        return true;
     }
 
     /// <summary>The next (or previous) row of a menu that is not a separator.</summary>
@@ -574,8 +611,9 @@ public partial class PopupWindow
             into.DropMarker = DropMarker.Into;
         else
             ShowInsertMarker(index, menu.Items);
-        // Holding the drag over a sub-folder opens it, like resting the mouse on it
-        ScheduleMenuHover(into, _menus.IndexOf(menu) + 1);
+        // Holding the drag over a sub-folder opens it, after the same wait as in the popup's list (a drag
+        // crosses folders on its way to where it drops)
+        ScheduleMenuHover(into, _menus.IndexOf(menu) + 1, SpringDelay);
     }
 
     void MenuDrop(FolderMenu menu, DragEventArgs e)

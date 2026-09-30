@@ -20,8 +20,10 @@
 
     <Border x:Name="Root">
         <Grid>
+            <!-- Never focusable: giving a row the focus would activate this window (Win32 SetFocus), the
+                 popup would lose the focus and close before the click does anything -->
             <ListBox x:Name="List" Margin="4,6" Background="Transparent" BorderThickness="0"
-                     SelectionMode="Single"
+                     SelectionMode="Single" Focusable="False"
                      IsTextSearchEnabled="False"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      ScrollViewer.CanContentScroll="False"

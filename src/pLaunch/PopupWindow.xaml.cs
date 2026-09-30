@@ -89,6 +89,7 @@ public partial class PopupWindow : Window
         Deactivated += OnDeactivated;
         PreviewKeyDown += OnPreviewKeyDown;
         PreviewTextInput += OnPreviewTextInput;
+        PreviewMouseMove += (_, _) => PointerStillSinceOpen(); // anywhere in the popup (footer, search...)
         DragEnter += OnDragEnter;
         DragOver += OnDragOver;
         DragLeave += (_, _) => _dragLeaveTimer.Start();
@@ -113,6 +114,8 @@ public partial class PopupWindow : Window
 
     bool IsOpen => IsVisible && WindowState == WindowState.Normal;
 
+    TaskbarButton? _taskbarButton; // out of Alt+Tab and Win+Tab, with a taskbar button all the same
+
     /// <summary>False only in UI test harnesses, so an opened popup never takes the focus from the user.</summary>
     internal bool ActivateOnOpen { get; set; } = true;
 
@@ -133,7 +136,7 @@ public partial class PopupWindow : Window
         ShowActivated = !minimized;
         Show();
         ShowActivated = true;
-        AddTaskbarButton();
+        _taskbarButton?.Request();
         QueueIconLoad();
         ScheduleJumpList();
         if (!minimized)
@@ -197,6 +200,7 @@ public partial class PopupWindow : Window
     void OnPopupOpened()
     {
         NativeMethods.GetCursorPos(out _anchor);
+        RememberPointerAtOpen();
         Place();
         if (ActivateOnOpen)
             Activate();
@@ -220,7 +224,12 @@ public partial class PopupWindow : Window
             return;
         Dispatcher.BeginInvoke(() =>
         {
-            if (!IsActive && _suppressHide == 0)
+            if (IsActive || _suppressHide > 0)
+                return;
+            // One of its own menus got activated after all: the popup takes the focus back instead of closing
+            if (_menus.Any(m => m.IsActive))
+                Activate();
+            else
                 HidePopup(auto: true);
         });
     }
@@ -299,8 +308,7 @@ public partial class PopupWindow : Window
         source.AddHook(WndProc);
         source.CompositionTarget.BackgroundColor = Colors.Transparent;
 
-        TaskbarTab.HideFromSwitchers(_hwnd); // a launcher, not a window to switch to; the button comes back in Start
-        TaskbarTab.SetOffscreenMinimizedPosition(_hwnd);
+        _taskbarButton = TaskbarButton.For(_hwnd); // a launcher, not a window to switch to; the button comes in Start
         NativeMethods.SetDwmInt(_hwnd, NativeMethods.DWMWA_TRANSITIONS_FORCEDISABLED, 1); // no minimize/restore animation
         NativeMethods.SetDwmInt(_hwnd, NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE, NativeMethods.DWMWCP_ROUND);
         // No acrylic before Windows 11 22H2: a solid background then
@@ -373,31 +381,8 @@ public partial class PopupWindow : Window
         }
         if (msg == NativeMethods.WM_SYSCOMMAND && ((int)wParam & 0xFFF0) == NativeMethods.SC_MAXIMIZE)
             handled = true;
-        else if (msg == TaskbarTab.TaskbarCreatedMessage)
-            AddTaskbarButton(); // Explorer restarted: the shell forgot the button it was given
-        TaskbarTab.KeepMinimizedOffscreen(hwnd, msg, lParam); // no little title bar above the taskbar
+        _taskbarButton?.HandleMessage(msg, lParam);
         return IntPtr.Zero;
-    }
-
-    /// <summary>
-    /// The popup is a tool window (not in Alt+Tab or Win+Tab), so its taskbar button is asked for. The
-    /// shell handles a new window asynchronously and would drop a button given too early: it is asked
-    /// for once the window is shown, and once more a moment later (a second request changes nothing).
-    /// </summary>
-    void AddTaskbarButton()
-    {
-        if (_hwnd == IntPtr.Zero)
-            return;
-        foreach (var delay in new[] { 300, 1500 })
-        {
-            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(delay) };
-            timer.Tick += (_, _) =>
-            {
-                timer.Stop();
-                TaskbarTab.Add(_hwnd);
-            };
-            timer.Start();
-        }
     }
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)

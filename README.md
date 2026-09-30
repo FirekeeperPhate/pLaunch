@@ -104,6 +104,9 @@ dotnet build pLaunch.slnx
 dotnet test pLaunch.slnx
 ```
 
+`tests/ui/MenuClicks.cs` checks the side menus with the real mouse and keyboard (it moves and clicks the
+pointer for a few seconds, only over its own windows): `dotnet run tests/ui/MenuClicks.cs -- <output folder>`.
+
 Installers (needs Inno Setup 6 or 7): `installer\build.ps1` runs the tests, publishes `publish\light` and
 `publish\full` and writes `installer\Output\pLaunch-Setup-<version>-<Light|Full>.exe`; the version comes
 from `<Version>` in `src/pLaunch/pLaunch.csproj`.
@@ -123,6 +126,9 @@ like a popup. It is a tool window, so Alt+Tab and Win+Tab leave it out; its task
 
 - `PopupWindow` — the flyout: open/close toggle, placement, drag and drop, context menus
 - `Native/PopupPlacement` — where the popup goes (taskbar edge, auto-hide, multi-monitor, DPI)
+- `Native/TaskbarButton`, `Native/TaskbarTab` — the taskbar button of a window left out of the switchers:
+  asked for until the shell confirms it, again after Explorer restarts, removed on close; the minimized
+  window kept off screen
 - `Services/DropReader` — file drops, browser links, Shell IDList arrays (Start menu apps)
 - `Services/IconProvider` — shell icons through `IShellItemImageFactory`
 - `Services/SingleInstance` — a second start forwards its arguments to the running instance over a named pipe

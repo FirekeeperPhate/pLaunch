@@ -32,6 +32,12 @@ public partial class FolderMenu : Window
 
     public ObservableCollection<ItemViewModel> Items { get; } = [];
 
+    /// <summary>
+    /// Opened (or entered) from the keyboard: the arrows, Enter and Del act in it. A menu the mouse
+    /// opened by resting on a folder leaves the keys to the list it came from.
+    /// </summary>
+    public bool KeyboardActive { get; set; }
+
     public IntPtr Handle { get; private set; }
 
     /// <summary>Creates the window handle without showing it, so it can be sized and placed first.</summary>
@@ -40,10 +46,34 @@ public partial class FolderMenu : Window
         if (Handle != IntPtr.Zero)
             return Handle;
         Handle = new WindowInteropHelper(this).EnsureHandle();
-        HwndSource.FromHwnd(Handle).CompositionTarget.BackgroundColor = System.Windows.Media.Colors.Transparent;
+        var source = HwndSource.FromHwnd(Handle);
+        source.CompositionTarget.BackgroundColor = System.Windows.Media.Colors.Transparent;
+        source.AddHook(WndProc);
         long style = GetWindowLongPtr(Handle, GWL_EXSTYLE).ToInt64();
         SetWindowLongPtr(Handle, GWL_EXSTYLE, new IntPtr(style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW));
         return Handle;
+    }
+
+    /// <summary>
+    /// The rows look like the popup's (<paramref name="popupRows"/>) but never take the focus: giving a row
+    /// the focus would activate this window (Win32 SetFocus), the popup would lose the focus and close
+    /// before the click does anything.
+    /// </summary>
+    public void UseRowStyle(Style popupRows)
+    {
+        var rows = new Style(typeof(ListBoxItem), popupRows);
+        rows.Setters.Add(new Setter(FocusableProperty, false));
+        List.ItemContainerStyle = rows;
+    }
+
+    // A click must not make the menu the active window: the popup would lose the focus and close
+    internal static IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WM_MOUSEACTIVATE = 0x0021, MA_NOACTIVATE = 3;
+        if (msg != WM_MOUSEACTIVATE)
+            return IntPtr.Zero;
+        handled = true;
+        return new IntPtr(MA_NOACTIVATE);
     }
 
     /// <summary>The row of an item, when it has one on screen.</summary>

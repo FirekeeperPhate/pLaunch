@@ -27,9 +27,23 @@ public static class RunningApps
     static readonly ConcurrentDictionary<string, (DateTime Written, AppIdentity? Identity)> ShortcutCache =
         new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The windows of other programs, front to back.</summary>
-    public static List<AppWindow> Windows()
+    static readonly object ScanLock = new();
+    static (long Time, List<AppWindow> Windows)? _lastScan; // null until the first scan
+
+    /// <summary>The windows of other programs, front to back, looked up now.</summary>
+    public static List<AppWindow> Windows() => Windows(TimeSpan.Zero);
+
+    /// <summary>
+    /// The same, or the list of a scan at most <paramref name="maxAge"/> old: menus opened one after
+    /// another while the pointer moves need not read every window's properties again.
+    /// </summary>
+    public static List<AppWindow> Windows(TimeSpan maxAge)
     {
+        lock (ScanLock)
+        {
+            if (maxAge > TimeSpan.Zero && _lastScan is { } last && Environment.TickCount64 - last.Time <= (long)maxAge.TotalMilliseconds)
+                return last.Windows;
+        }
         var paths = new Dictionary<uint, string?>();
         var result = new List<AppWindow>();
         foreach (var (hwnd, pid) in WindowInterop.AppWindows())
@@ -38,6 +52,8 @@ public static class RunningApps
                 paths[pid] = exe = WindowInterop.ProcessPath(pid);
             result.Add(new AppWindow(hwnd, exe, ShellInterop.GetWindowAppId(hwnd)));
         }
+        lock (ScanLock)
+            _lastScan = (Environment.TickCount64, result);
         return result;
     }
 

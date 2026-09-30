@@ -315,6 +315,14 @@ public sealed class RunAndSnippetTests : IDisposable
     }
 
     [Fact]
+    public void Running_AFreshLookIsNeverTheCachedOne_ARecentOneMayBe()
+    {
+        var fresh = RunningApps.Windows();
+        Assert.NotSame(fresh, RunningApps.Windows()); // zero age: always looked up again
+        Assert.Same(RunningApps.Windows(), RunningApps.Windows(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
     public void Running_NothingOpen_StartsNormally()
     {
         var item = new LaunchItem { Kind = ItemKind.File, Target = Path.Combine(_dir, "never-running.exe"), SwitchToRunning = true };

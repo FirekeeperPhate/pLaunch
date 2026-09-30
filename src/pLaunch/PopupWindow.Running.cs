@@ -22,8 +22,11 @@ public partial class PopupWindow
         MarkRunning(_items.ToList(), () => scan == _runningScan);
     }
 
-    /// <summary>Marks the given rows (the popup's, or a menu's); <paramref name="current"/> = the result is still wanted.</summary>
-    async void MarkRunning(List<ItemViewModel> items, Func<bool>? current = null)
+    /// <summary>
+    /// Marks the given rows (the popup's, or a menu's); <paramref name="current"/> = the result is still
+    /// wanted; <paramref name="reuse"/> = how old a look at the windows may be (zero = look now).
+    /// </summary>
+    async void MarkRunning(List<ItemViewModel> items, Func<bool>? current = null, TimeSpan reuse = default)
     {
         var shown = items.Where(i => RunningApps.CanSwitch(i.Model)).ToList();
         foreach (var vm in items.Except(shown))
@@ -36,7 +39,7 @@ public partial class PopupWindow
         {
             running = await Task.Run(() =>
             {
-                var windows = RunningApps.Windows();
+                var windows = RunningApps.Windows(reuse);
                 return models.Select(m => RunningApps.WindowsOf(m, windows).Count > 0).ToArray();
             });
         }
