@@ -200,6 +200,7 @@ public partial class PopupWindow : Window
         List.SelectedIndex = -1;
         List.Focus();
         RefreshMissing();
+        RefreshRunning();
         QueueIconLoad();
 
         // Opened by hovering the taskbar button during a drag: close again if the drop happens elsewhere
@@ -412,14 +413,17 @@ public partial class PopupWindow : Window
         List<ItemViewModel> target;
         if (IsSearching)
         {
-            // Results from every sub-folder, best first; the tooltip tells where each one lives
-            target = [];
+            // Results from every sub-folder, best first; the tooltip tells where each one lives. Around
+            // them what the text itself can open: a path or an address first, a command or a web search last.
+            var (first, last) = RunSuggestions.For(_search, _settings.WebSearch);
+            target = first.Select(ViewModelFor).ToList();
             foreach (var (item, location) in ItemSearch.Find(_root, _search))
             {
                 var vm = ViewModelFor(item);
                 vm.Location = location;
                 target.Add(vm);
             }
+            target.AddRange(last.Select(ViewModelFor));
         }
         else
         {
@@ -465,13 +469,20 @@ public partial class PopupWindow : Window
         }
         QueueIconLoad();
         if (IsOpen)
+        {
             Place();
+            RefreshRunning();
+        }
     }
 
     ItemViewModel ViewModelFor(LaunchItem item)
     {
-        if (!_viewModels.TryGetValue(item.Id, out var vm) || vm.Model != item)
-            _viewModels[item.Id] = vm = new ItemViewModel(item);
+        // Items made on the fly (live folder entries, search suggestions) come as new objects on every
+        // refresh: the same id is the same thing, so the row (and its icon) stays
+        if (_viewModels.TryGetValue(item.Id, out var vm)
+            && (vm.Model == item || (item.IsLive && vm.Model.IsLive && vm.Model.Target == item.Target && vm.Model.Name == item.Name)))
+            return vm;
+        _viewModels[item.Id] = vm = new ItemViewModel(item);
         return vm;
     }
 
@@ -767,16 +778,11 @@ public partial class PopupWindow : Window
         vm.IconPixels = 0;
         vm.IsMissing = Launcher.IsMissing(vm.Model);
         Save(); // also registers a changed shortcut
-        if (vm.Model.Hotkey is { Length: > 0 } hotkey && _failedHotkeys.Contains(vm.Model.Id))
-        {
-            ShowError($"The shortcut {hotkey} cannot be used.", "Another program (or another list) already uses it. It was removed from the item.");
-            vm.Model.Hotkey = null;
-            Save();
-        }
+        DropTakenHotkey(vm.Model);
         Refresh(vm.Model.Id);
     }
 
-    void Launch(ItemViewModel item, bool asAdmin = false)
+    void Launch(ItemViewModel item, bool asAdmin = false, bool newWindow = false)
     {
         if (Launcher.IsMissing(item.Model))
         {
@@ -787,7 +793,7 @@ public partial class PopupWindow : Window
         try
         {
             // Launch first: while pLaunch is still the foreground app the new window may take the focus
-            if (Launcher.Launch(item.Model, asAdmin))
+            if (Launcher.Launch(item.Model, asAdmin, newWindow))
             {
                 CountLaunches([item.Model]);
                 HidePopup();
@@ -1167,6 +1173,11 @@ public partial class PopupWindow : Window
             case ItemKind.Shell when ShellInterop.CreateIdListArray(item.Target) is { } idList:
                 data.SetData(DropReader.ShellIdListFormat, idList);
                 break;
+            case ItemKind.Text or ItemKind.Command:
+                // Dropped into an editor: the snippet (or the command line) is inserted there
+                data.SetText(item.Target.Replace("\r\n", "\n").Replace("\n", "\r\n"));
+                effects |= DragDropEffects.Copy;
+                break;
         }
         return (data, effects);
     }
@@ -1233,7 +1244,9 @@ public partial class PopupWindow : Window
             return;
         }
 
-        var open = CreateMenuItem("Open", () => Open(item), item.IsNavigable ? "\xE838" : "\xE8A7");
+        var open = item.Model.Kind == ItemKind.Text
+            ? CreateMenuItem(item.Model.PasteText ? "Paste" : "Copy", () => Open(item), item.Model.PasteText ? "\xE77F" : "\xE8C8")
+            : CreateMenuItem("Open", () => Open(item), item.IsNavigable ? "\xE838" : "\xE8A7");
         open.FontWeight = FontWeights.SemiBold;
         menu.Items.Add(open);
         if (item.IsGroup && (item.Model.Children ?? []).Count(c => c.IsLaunchable) is var count and > 0)
@@ -1241,15 +1254,23 @@ public partial class PopupWindow : Window
         // A live folder opens inside pLaunch on click: Explorer is one step away
         if (item.Model.Kind == ItemKind.Folder && item.Model.ShowContents)
             menu.Items.Add(CreateMenuItem("Open in File Explorer", () => Launch(item), "\xEC50"));
+        // "Open" brings the running program to the front: a second window is one step away
+        if (item.Model.SwitchToRunning && item.IsRunning)
+            menu.Items.Add(CreateMenuItem("Open a new window", () => Launch(item, newWindow: true), "\xE8A7"));
+        if (item.Model.Kind == ItemKind.Text && item.Model.PasteText)
+            menu.Items.Add(CreateMenuItem("Copy only", () => CopySnippet(item), "\xE8C8"));
         if (Launcher.CanRunAsAdmin(item.Model))
             menu.Items.Add(CreateMenuItem("Run as administrator", () => Launch(item, asAdmin: true), "\xEA18", "Ctrl+Shift+Enter"));
         if (Launcher.HasLocation(item.Model))
             menu.Items.Add(CreateMenuItem("Open file location", () => OpenLocation(item), "\xE838"));
         if (item.Model.IsLive)
         {
-            // An entry of a live folder is not saved: it can only be copied into the list
-            menu.Items.Add(new Separator());
-            menu.Items.Add(CreateMenuItem("Add to pLaunch", () => AddLiveCopy(item.Model), "\xE710"));
+            // An entry of a live folder or a search suggestion is not saved: it can only be copied into the list
+            if (item.Model.Id != RunSuggestions.WebSearchId)
+            {
+                menu.Items.Add(new Separator());
+                menu.Items.Add(CreateMenuItem("Add to pLaunch", () => AddLiveCopy(item.Model), "\xE710"));
+            }
             return;
         }
         menu.Items.Add(new Separator());
@@ -1274,6 +1295,9 @@ public partial class PopupWindow : Window
     {
         menu.Items.Add(CreateMenuItem("Files\x2026", AddFiles, "\xE8E5"));
         menu.Items.Add(CreateMenuItem("Folder\x2026", AddFolder, "\xE8B7"));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(CreateMenuItem("Command\x2026", () => NewByProperties(ItemKind.Command), "\xE756"));
+        menu.Items.Add(CreateMenuItem("Text snippet\x2026", () => NewByProperties(ItemKind.Text), "\xE77F"));
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem("New sub-folder", NewFolder, "\xE8F4"));
         menu.Items.Add(CreateMenuItem("Separator", NewSeparator, "\xE76F"));
@@ -1344,6 +1368,12 @@ public partial class PopupWindow : Window
             vm.IconPixels = 0;
         }
         QueueIconLoad();
+    }
+
+    internal void SetWebSearch(WebSearch engine)
+    {
+        _settings.WebSearch = engine;
+        Save();
     }
 
     void AppearanceChanged()

@@ -19,7 +19,7 @@ public static class DropReader
         || data.GetDataPresent(ShellIdListFormat)
         || data.GetDataPresent(UrlFormatW)
         || data.GetDataPresent(UrlFormat)
-        || (data.GetDataPresent(DataFormats.UnicodeText) && ReadText(data) is { } t && ItemFactory.FromText(t) != null);
+        || (ReadText(data) is { } t && !string.IsNullOrWhiteSpace(t)); // paths and links, or a text snippet
 
     public static List<LaunchItem> Read(IDataObject data)
     {
@@ -40,12 +40,23 @@ public static class DropReader
         if (url != null && ItemFactory.FromUrl(url, ReadDescriptorTitle(data)) is { } link)
             return [link];
 
-        if (ReadText(data) is { } text)
-        {
-            return text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(ItemFactory.FromText).OfType<LaunchItem>().ToList();
-        }
-        return [];
+        return ReadText(data) is { } text ? FromPlainText(text) : [];
+    }
+
+    /// <summary>
+    /// Text: one item per line when every line is a path or a link, otherwise the whole text becomes a
+    /// snippet (a click copies it, and can paste it).
+    /// </summary>
+    internal static List<LaunchItem> FromPlainText(string text)
+    {
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length == 0)
+            return [];
+        var items = lines.Select(ItemFactory.FromText).ToList();
+        if (items.All(i => i != null))
+            return items!;
+        var snippet = text.Replace("\r\n", "\n").Trim('\n');
+        return [new LaunchItem { Kind = ItemKind.Text, Target = snippet, Name = LaunchItem.Summary(snippet, 40) }];
     }
 
     static string? ReadText(IDataObject data) =>

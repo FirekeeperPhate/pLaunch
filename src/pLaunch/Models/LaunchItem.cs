@@ -13,9 +13,17 @@ public enum ItemKind
     Separator,
     /// <summary>A pLaunch sub-folder holding other items (<see cref="LaunchItem.Children"/>), opened inside the popup.</summary>
     Group,
+    /// <summary>A command line run by the Command Prompt or PowerShell (<see cref="LaunchItem.Target"/> holds it).</summary>
+    Command,
+    /// <summary>A text snippet: a click copies it (<see cref="LaunchItem.Target"/>) and can paste it into the active window.</summary>
+    Text,
 }
 
-public enum StartWindow { Normal, Minimized, Maximized }
+/// <summary>How the started window shows; <see cref="Hidden"/> only for commands (no console window at all).</summary>
+public enum StartWindow { Normal, Minimized, Maximized, Hidden }
+
+/// <summary>What runs a <see cref="ItemKind.Command"/>.</summary>
+public enum CommandShell { Cmd, PowerShell, Pwsh }
 
 public sealed class LaunchItem
 {
@@ -50,6 +58,14 @@ public sealed class LaunchItem
     public StartWindow StartWindow { get; set; }
     /// <summary>Global shortcut that launches the item without opening the popup ("Ctrl+Alt+E"); null = none.</summary>
     public string? Hotkey { get; set; }
+    /// <summary>A program already running is brought to the front instead of being started again.</summary>
+    public bool SwitchToRunning { get; set; }
+    /// <summary>Commands: what runs them.</summary>
+    public CommandShell Shell { get; set; }
+    /// <summary>Commands: the console window stays open when the command ends.</summary>
+    public bool KeepOpen { get; set; }
+    /// <summary>Text snippets: pasted into the window that was active, not only copied.</summary>
+    public bool PasteText { get; set; } = true;
     /// <summary>How often it was launched, for the "most used" order.</summary>
     public int LaunchCount { get; set; }
     public DateTime? LastLaunched { get; set; }
@@ -57,8 +73,8 @@ public sealed class LaunchItem
     public List<LaunchItem>? Children { get; set; }
 
     /// <summary>
-    /// An entry of a live folder: made on the fly from the disk, never saved (its id is "live:" + path, so
-    /// the view keeps its icon across refreshes).
+    /// Made on the fly and never saved: an entry of a live folder (id "live:" + path, so the view keeps its
+    /// icon across refreshes) or a suggestion of the search box (id "run:...", see RunSuggestions).
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsLive { get; init; }
@@ -68,8 +84,16 @@ public sealed class LaunchItem
     /// <summary>Opens inside the popup: sub-folders of pLaunch and live folders.</summary>
     public bool IsNavigable => Kind == ItemKind.Group || (Kind == ItemKind.Folder && ShowContents);
 
-    /// <summary>Whether an icon is shown for it: launchable items, and sub-folders with a custom icon.</summary>
-    public bool HasShellIcon => IsLaunchable || (Kind == ItemKind.Group && !string.IsNullOrWhiteSpace(IconPath));
+    /// <summary>Whether an icon is loaded for it: launchable items but snippets (a glyph), and anything with a custom icon.</summary>
+    public bool HasShellIcon => Kind != ItemKind.Separator
+        && (!string.IsNullOrWhiteSpace(IconPath) || (IsLaunchable && Kind != ItemKind.Text));
+
+    /// <summary>The first line of a command or snippet, shortened: a name for it, and its tooltip/jump list text.</summary>
+    public static string Summary(string text, int max = 60)
+    {
+        var line = text.Trim().Split('\n')[0].Trim();
+        return line.Length <= max ? line : line[..(max - 1)].TrimEnd() + "\x2026";
+    }
 
     /// <summary>Same thing to launch (used to skip duplicates when adding). Groups and separators never match.</summary>
     public bool IsSameTarget(LaunchItem other) =>

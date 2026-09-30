@@ -34,12 +34,14 @@ public static class IconProvider
             var worker = Launcher.IsNetworkPath(path) ? Network : Local;
             return await worker.Enqueue($"{path}|{item.IconIndex}", pixelSize, () => LoadCustom(path, item.IconIndex, pixelSize));
         }
-        if (item.Kind == ItemKind.Url && WebIconsEnabled && Uri.TryCreate(item.Target, UriKind.Absolute, out var uri)
+        // Not for search box suggestions: each typed letter would be another site to ask
+        if (item.Kind == ItemKind.Url && WebIconsEnabled && !item.IsLive && Uri.TryCreate(item.Target, UriKind.Absolute, out var uri)
             && await FaviconService.GetAsync(uri) is { } favicon)
             return favicon;
         if (item.Kind == ItemKind.Url)
             return await Local.EnqueueBrowserIcon(pixelSize);
-        var target = item.Target;
+        // A command shows the icon of what runs it
+        var target = item.Kind == ItemKind.Command ? Launcher.CommandHost(item.Shell) : item.Target;
         var targetWorker = item.Kind is ItemKind.File or ItemKind.Folder && Launcher.IsNetworkPath(target) ? Network : Local;
         return await targetWorker.Enqueue(target, pixelSize, () => Load(target, pixelSize, NativeMethods.SIIGBF.IconOnly));
     }

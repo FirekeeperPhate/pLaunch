@@ -31,6 +31,7 @@ public partial class PropertiesWindow : Window
         RunAsAdminBox.IsChecked = item.RunAsAdmin;
 
         bool file = item.Kind == ItemKind.File, folder = item.Kind == ItemKind.Folder;
+        bool command = item.Kind == ItemKind.Command, text = item.Kind == ItemKind.Text;
         KindText.Text = item.Kind switch
         {
             ItemKind.File => "Program or file",
@@ -38,18 +39,36 @@ public partial class PropertiesWindow : Window
             ItemKind.Url => "Web link",
             ItemKind.Shell => "App",
             ItemKind.Group => "Sub-folder of pLaunch",
+            ItemKind.Command => "Command",
+            ItemKind.Text => "Text snippet: a click copies it",
             _ => "",
         };
-        TargetLabel.Text = item.Kind == ItemKind.Url ? "URL" : "Target";
-        var targetRow = item.Kind is ItemKind.File or ItemKind.Folder or ItemKind.Url or ItemKind.Shell;
+        if (item.Target.Length == 0 && (command || text))
+            Title = command ? "New command" : "New text snippet";
+        TargetLabel.Text = item.Kind switch { ItemKind.Url => "URL", ItemKind.Command => "Command", ItemKind.Text => "Text", _ => "Target" };
+        var targetRow = item.Kind is ItemKind.File or ItemKind.Folder or ItemKind.Url or ItemKind.Shell or ItemKind.Command or ItemKind.Text;
         SetVisible(targetRow, TargetLabel, TargetBox);
         SetVisible(file || folder, BrowseTargetButton);
         TargetBox.IsReadOnly = item.Kind == ItemKind.Shell; // shell:AppsFolder names are not typed by hand
-        SetVisible(file, ArgumentsLabel, ArgumentsBox, StartInLabel, StartInBox, BrowseStartInButton, StartWindowLabel, StartWindowBox);
+        if (command || text)
+            MakeMultiline(text ? 120 : 64);
+        SetVisible(file, ArgumentsLabel, ArgumentsBox);
+        SetVisible(file || command, StartInLabel, StartInBox, BrowseStartInButton, StartWindowLabel, StartWindowBox);
+        if (command)
+            StartInBox.ToolTip = "Empty: your user folder. Environment variables such as %USERPROFILE% work.";
+        SetVisible(command, ShellLabel, ShellBox, KeepOpenBox, HiddenWindowItem);
+        SetVisible(text, PasteBox);
+        SetVisible(RunningApps.CanSwitch(item), SwitchBox);
         SetVisible(Launcher.CanRunAsAdmin(item), RunAsAdminBox);
         SetVisible(item.IsLaunchable, HotkeyLabel, HotkeyPanel);
         SetVisible(folder, ShowContentsBox);
-        StartWindowBox.SelectedIndex = (int)item.StartWindow;
+        StartWindowBox.SelectedIndex = item.StartWindow == StartWindow.Hidden && !command ? 0 : (int)item.StartWindow;
+        ShellBox.SelectedIndex = (int)item.Shell;
+        if (Launcher.PwshPath == null)
+            PwshItem.Content = "PowerShell 7 (not installed)";
+        KeepOpenBox.IsChecked = item.KeepOpen;
+        PasteBox.IsChecked = item.PasteText;
+        SwitchBox.IsChecked = item.SwitchToRunning;
         ShowContentsBox.IsChecked = item.ShowContents;
         HotkeyBox.Gesture = item.Hotkey;
         HotkeyWinBox.IsChecked = HotkeyBox.UseWin;
@@ -57,14 +76,39 @@ public partial class PropertiesWindow : Window
             : $"Opened {item.LaunchCount} time{(item.LaunchCount == 1 ? "" : "s")}"
               + (item.LastLaunched is { } last ? $", last on {last.ToLocalTime():g}." : ".");
         UsageText.Visibility = item.LaunchCount == 0 ? Visibility.Collapsed : Visibility.Visible;
-        IconGlyph.Text = item.Kind switch { ItemKind.Url => "\xE774", ItemKind.Folder or ItemKind.Group => "\xE8B7", _ => "\xE8A5" };
+        IconGlyph.Text = item.Kind switch
+        {
+            ItemKind.Url => "\xE774",
+            ItemKind.Folder or ItemKind.Group => "\xE8B7",
+            ItemKind.Command => "\xE756",
+            ItemKind.Text => "\xE77F",
+            _ => "\xE8A5",
+        };
+        ShellBox.SelectionChanged += (_, _) => UpdatePreview(); // the icon of what runs the command
 
         Loaded += (_, _) =>
         {
-            NameBox.Focus();
-            NameBox.SelectAll();
+            // A new command or snippet starts from its content; the name can come from it
+            var first = (command || text) && item.Target.Length == 0 ? TargetBox : NameBox;
+            first.Focus();
+            first.SelectAll();
             UpdatePreview();
         };
+    }
+
+    /// <summary>Commands and snippets can span several lines.</summary>
+    void MakeMultiline(double height)
+    {
+        System.Windows.Controls.Grid.SetColumnSpan(TargetBox, 2); // no Browse button: the whole width
+        TargetBox.AcceptsReturn = true;
+        TargetBox.TextWrapping = TextWrapping.Wrap;
+        TargetBox.MinHeight = height;
+        TargetBox.MaxHeight = 260;
+        TargetBox.VerticalContentAlignment = VerticalAlignment.Top;
+        TargetBox.VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto;
+        TargetBox.FontFamily = new System.Windows.Media.FontFamily("Cascadia Mono, Consolas");
+        TargetLabel.VerticalAlignment = VerticalAlignment.Top;
+        TargetLabel.Margin = new Thickness(0, 6, 12, 8);
     }
 
     static void SetVisible(bool visible, params UIElement[] elements)
@@ -80,6 +124,7 @@ public partial class PropertiesWindow : Window
         {
             Kind = _item.Kind,
             Target = TargetBox.Text.Trim(),
+            Shell = (CommandShell)Math.Max(0, ShellBox.SelectedIndex),
             IconPath = _iconPath,
             IconIndex = _iconIndex,
         };
@@ -147,16 +192,25 @@ public partial class PropertiesWindow : Window
     void Ok_Click(object sender, RoutedEventArgs e)
     {
         var name = NameBox.Text.Trim();
-        if (name.Length == 0)
-        {
-            Warn("The name cannot be empty.");
-            NameBox.Focus();
-            return;
-        }
         var target = TargetBox.Text.Trim().Trim('"');
         var kind = _item.Kind;
         switch (kind)
         {
+            case ItemKind.Command or ItemKind.Text:
+                // A snippet is kept exactly as typed (spaces, a final line break); \n inside
+                var content = TargetBox.Text.Replace("\r\n", "\n");
+                if (kind == ItemKind.Command)
+                    content = content.Trim();
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    Warn(kind == ItemKind.Command ? "The command cannot be empty." : "The text cannot be empty.");
+                    TargetBox.Focus();
+                    return;
+                }
+                target = content;
+                if (name.Length == 0)
+                    name = LaunchItem.Summary(content, 40);
+                break;
             case ItemKind.Url:
                 if (!ItemFactory.TryParseUrl(target, out var uri))
                 {
@@ -183,18 +237,32 @@ public partial class PropertiesWindow : Window
                     return;
                 break;
         }
+        if (name.Length == 0)
+        {
+            Warn("The name cannot be empty.");
+            NameBox.Focus();
+            return;
+        }
 
+        bool command = kind == ItemKind.Command;
         _item.Name = name;
         _item.Kind = kind;
-        if (kind is ItemKind.File or ItemKind.Folder or ItemKind.Url)
+        if (kind is ItemKind.File or ItemKind.Folder or ItemKind.Url or ItemKind.Command or ItemKind.Text)
             _item.Target = target;
         _item.Arguments = kind == ItemKind.File && ArgumentsBox.Text.Trim() is { Length: > 0 } args ? args : null;
-        _item.WorkingDirectory = kind == ItemKind.File && StartInBox.Text.Trim() is { Length: > 0 } folder ? folder : null;
+        _item.WorkingDirectory = (kind == ItemKind.File || command) && StartInBox.Text.Trim() is { Length: > 0 } folder ? folder : null;
         _item.RunAsAdmin = RunAsAdminBox.Visibility == Visibility.Visible && RunAsAdminBox.IsChecked == true && Launcher.CanRunAsAdmin(_item);
         _item.IconPath = _iconPath;
         _item.IconIndex = _iconPath == null ? 0 : _iconIndex;
-        _item.StartWindow = kind == ItemKind.File ? (StartWindow)Math.Max(0, StartWindowBox.SelectedIndex) : StartWindow.Normal;
+        var window = (StartWindow)Math.Max(0, StartWindowBox.SelectedIndex);
+        // Hidden is for commands only (a program started hidden could not be reached)
+        _item.StartWindow = command || (kind == ItemKind.File && window != StartWindow.Hidden) ? window : StartWindow.Normal;
         _item.ShowContents = kind == ItemKind.Folder && ShowContentsBox.IsChecked == true;
+        _item.Shell = command ? (CommandShell)Math.Max(0, ShellBox.SelectedIndex) : CommandShell.Cmd;
+        _item.KeepOpen = command && KeepOpenBox.IsChecked == true;
+        _item.PasteText = kind != ItemKind.Text || PasteBox.IsChecked == true;
+        // Only where pLaunch can tell the program's windows (the target may have changed to a document)
+        _item.SwitchToRunning = SwitchBox.IsChecked == true && SwitchBox.Visibility == Visibility.Visible && RunningApps.CanSwitch(_item);
         // Checked against the other programs when saved: the list tells if it is taken
         _item.Hotkey = _item.IsLaunchable ? HotkeyBox.Gesture : null;
         DialogResult = true;

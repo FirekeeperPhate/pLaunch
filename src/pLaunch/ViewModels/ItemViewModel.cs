@@ -63,6 +63,9 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
             {
                 ItemKind.Group => $"{Model.Name} ({ChildInfo})",
                 ItemKind.Separator => "",
+                ItemKind.Command => $"{Model.Name}\n{Preview(Model.Target, 3)}",
+                ItemKind.Text => $"{Model.Name}\n{Preview(Model.Target, 6)}\n{(Model.PasteText ? "Click to paste it" : "Click to copy it")}",
+                _ when Model.IsLive && Model.Id.StartsWith(RunSuggestions.IdPrefix) => Model.Name,
                 _ => $"{Model.Name}\n{(Model.Arguments is { Length: > 0 } args ? $"{Model.Target} {args}" : Model.Target)}",
             };
             if (Model.Hotkey is { Length: > 0 } hotkey)
@@ -71,6 +74,14 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
                 text += $"\nOpened {Model.LaunchCount} time{(Model.LaunchCount == 1 ? "" : "s")}";
             return _location is { Length: > 0 } location ? $"{text}\nIn: {location}" : text;
         }
+    }
+
+    /// <summary>The first lines of a command or snippet, for the tooltip.</summary>
+    static string Preview(string text, int maxLines)
+    {
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        var shown = lines.Take(maxLines).Select(l => l.Length > 80 ? l[..79] + "\x2026" : l);
+        return string.Join("\n", shown) + (lines.Length > maxLines ? "\n\x2026" : "");
     }
 
     /// <summary>After a launch was counted: the tooltip shows the count.</summary>
@@ -101,6 +112,8 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
         ItemKind.Url => "\xE774",    // Globe
         ItemKind.Folder => "\xE8B7", // Folder
         ItemKind.Group => "\xE8B7",  // Folder (drawn in the accent color)
+        ItemKind.Command => "\xE756", // CommandPrompt
+        ItemKind.Text => "\xE77F",   // Paste
         _ => "\xE8A5",               // Document
     };
 
@@ -119,6 +132,11 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
     public bool IconPending { get; set; }
 
     public bool IsMissing { get => _isMissing; set => Set(ref _isMissing, value); }
+
+    bool _isRunning;
+
+    /// <summary>The program has an open window: a short line under the icon, like on the taskbar.</summary>
+    public bool IsRunning { get => _isRunning; set => Set(ref _isRunning, value); }
 
     public bool IsEditing { get => _isEditing; set => Set(ref _isEditing, value); }
 

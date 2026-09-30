@@ -94,6 +94,16 @@
                 </DockPanel>
                 <TextBlock x:Name="HotkeyStatus" Margin="0,0,0,6" FontSize="12" TextWrapping="Wrap"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                            ToolTip="The search box offers a web search for what you typed, below the list's own results">
+                    <TextBlock Text="Search the web with" Style="{StaticResource Label}" />
+                    <ComboBox x:Name="WebSearchBox" MinWidth="170" SelectionChanged="WebSearchBox_SelectionChanged">
+                        <ComboBoxItem Content="Google" />
+                        <ComboBoxItem Content="Bing" />
+                        <ComboBoxItem Content="DuckDuckGo" />
+                        <ComboBoxItem Content="Off" />
+                    </ComboBox>
+                </StackPanel>
                 <StackPanel x:Name="ButtonIconPanel" Orientation="Horizontal" Margin="0,8,0,0">
                     <TextBlock Text="Taskbar icon of this list" Style="{StaticResource Label}" />
                     <Button Content="Change&#x2026;" Click="ButtonIcon_Click" />

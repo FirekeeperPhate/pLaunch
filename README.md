@@ -9,6 +9,19 @@ shortcuts (programs, files, folders, web links, Store apps).
   (changeable in Settings); click an item to launch it.
 - **Search**: just start typing in the open list. It finds items in every sub-folder (accents and case
   don't matter; best matches and the most used first); Enter launches the first result, Esc clears.
+- **Run box**: the search box also opens what you type, like Win+R: a path (`C:\Projects`, `%TEMP%`),
+  a web address (`github.com`, `localhost:3000`), a `shell:` folder or a command (`cmd`,
+  `ping 1.1.1.1`). Below the results a web search is offered (Google, Bing, DuckDuckGo, or off in
+  Settings). Right click → *Add to pLaunch* keeps a suggestion.
+- **Already open**: a short line under the icon marks programs that have a window open. With *If it is
+  already open, bring its window to the front* (Properties) a click switches to it instead of starting it
+  again; right click → *Open a new window* starts another one anyway.
+- **Commands** (Add → Command…): a command line run by the Command Prompt, Windows PowerShell or
+  PowerShell 7, in a normal, minimized, maximized or hidden window, kept open when it ends if you like,
+  and as administrator if needed. Several lines run one after the other.
+- **Text snippets** (Add → Text snippet…, or drop or paste any text on the list): a click copies the
+  text and pastes it into the window you were using (or only copies it; right click → *Copy only*).
+  Drag a snippet into an editor to insert it there.
 - **Add** items by dragging them onto the list. You can also drag them onto the taskbar button and
   hold there for a moment: the list opens and you drop into it. The *Add* button and **Ctrl+V** work too.
 - **Right click** an item: open, run as administrator, open file location, rename, remove, and add a
@@ -112,4 +125,7 @@ like a popup.
 - `Services/FaviconService`, `Services/UpdateService`, `Services/AppConfig` (data folder, update settings)
 - `Services/GlobalHotkeys`, `Services/HotkeyGesture` — shortcuts that work from anywhere (`RegisterHotKey`)
 - `Services/ItemSearch`, `Services/LiveFolder` — search across sub-folders, live folders read from the disk
+- `Services/RunSuggestions` — what the search box can open by itself (paths, addresses, commands, web search)
+- `Services/RunningApps`, `Native/WindowInterop` — the windows of running programs (by program file or
+  AppUserModelID), bringing one to the front, and pasting snippets (`SendInput` Ctrl+V)
 - `Views/PropertiesWindow`, `Views/SettingsWindow` — item properties, settings

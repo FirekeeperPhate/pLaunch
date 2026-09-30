@@ -53,9 +53,12 @@ public sealed class JumpListBuilder
         int generation = ++_generation;
         // Copies: the items may be renamed or removed while the icons are looked up
         var items = ItemTree.Launchables(_source(), "Shortcuts")
-            .Select(e => (e.Item.Id, e.Item.Name, e.Item.Target, e.Item.Kind, e.Category, e.Item.IconPath, e.Item.IconIndex)).ToList();
+            .Select(e => (e.Item.Id, e.Item.Name, Target: Describe(e.Item), e.Item.Kind,
+                // A command shows the icon of what runs it
+                IconTarget: e.Item.Kind == ItemKind.Command ? Launcher.CommandHost(e.Item.Shell) : e.Item.Target,
+                e.Category, e.Item.IconPath, e.Item.IconIndex)).ToList();
         var icons = await Task.Run(() => items.Select(i =>
-            CustomIconResource(i.IconPath, i.IconIndex) ?? (IconResourceFor(i.Kind, i.Target) ?? exe, 0)).ToList());
+            CustomIconResource(i.IconPath, i.IconIndex) ?? (IconResourceFor(i.Kind == ItemKind.Command ? ItemKind.File : i.Kind, i.IconTarget) ?? exe, 0)).ToList());
         if (generation != _generation)
             return; // a newer update is on its way
         if (Application.Current is null)
@@ -86,6 +89,10 @@ public sealed class JumpListBuilder
         }
     }
 
+    /// <summary>The line under the title: the target, or the start of a command or snippet.</summary>
+    static string Describe(LaunchItem item) =>
+        item.Kind is ItemKind.Command or ItemKind.Text ? LaunchItem.Summary(item.Target, 100) : item.Target;
+
     /// <summary>
     /// The item's custom icon when a jump list can show it: an icon resource of an .exe/.dll or an .ico
     /// (not a .png). Null otherwise, and then the target's icon is used.
@@ -112,6 +119,7 @@ public sealed class JumpListBuilder
         {
             ItemKind.Url => NativeMethods.GetAssociatedExecutable("https"),
             ItemKind.Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+            ItemKind.Text => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "notepad.exe"),
             // Network files are not opened (a .lnk would have to be read): the pLaunch icon stands in
             ItemKind.File when !Launcher.IsNetworkPath(target) => FileIcon(target),
             _ => null,
@@ -126,30 +134,7 @@ public sealed class JumpListBuilder
         if (ext.Equals(".exe", StringComparison.OrdinalIgnoreCase) || ext.Equals(".ico", StringComparison.OrdinalIgnoreCase))
             return target;
         if (ext.Equals(".lnk", StringComparison.OrdinalIgnoreCase))
-            return ShortcutTarget(target) is { } t && t.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? t : null;
+            return NativeShellLink.GetTarget(target) is { } t && t.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? t : null;
         return ext.Length > 0 ? NativeMethods.GetAssociatedExecutable(ext) : null;
-    }
-
-    static string? ShortcutTarget(string lnk)
-    {
-        try
-        {
-            var link = (NativeShellLink.IShellLinkW)new NativeShellLink.ShellLink();
-            try
-            {
-                ((System.Runtime.InteropServices.ComTypes.IPersistFile)link).Load(lnk, 0);
-                var sb = new System.Text.StringBuilder(1024);
-                link.GetPath(sb, sb.Capacity, IntPtr.Zero, 0);
-                return sb.Length > 0 ? sb.ToString() : null;
-            }
-            finally
-            {
-                System.Runtime.InteropServices.Marshal.ReleaseComObject(link);
-            }
-        }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or IOException or UnauthorizedAccessException or InvalidCastException)
-        {
-            return null;
-        }
     }
 }

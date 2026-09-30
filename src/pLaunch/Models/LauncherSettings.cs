@@ -30,6 +30,9 @@ public enum ThemeChoice
     Dark,
 }
 
+/// <summary>Where "Search the web" in the search results goes; Off hides it.</summary>
+public enum WebSearch { Google, Bing, DuckDuckGo, Off }
+
 public sealed class LauncherSettings
 {
     public ViewMode View { get; set; } = ViewMode.List;
@@ -56,4 +59,5 @@ public sealed class LauncherSettings
     /// Win+Alt+Space; new lists start without one (two lists cannot share it).
     /// </summary>
     public string Hotkey { get; set; } = "Win+Alt+Space";
+    public WebSearch WebSearch { get; set; } = WebSearch.Google;
 }

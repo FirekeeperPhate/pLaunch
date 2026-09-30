@@ -84,17 +84,48 @@ public partial class PopupWindow
         return _path[firstLive - 1].Children ??= [];
     }
 
-    /// <summary>A live entry becomes a saved shortcut (in the list that holds the live folder).</summary>
+    /// <summary>
+    /// A live entry or a search suggestion becomes a saved shortcut: in the list that holds the live
+    /// folder, or in the level being shown.
+    /// </summary>
     void AddLiveCopy(LaunchItem live)
     {
-        if (ItemFactory.FromPath(live.Target) is not { } copy)
+        if (SavedCopy(live) is not { } copy)
             return;
-        var level = RealLevel();
+        bool fromLiveFolder = InLiveFolder;
+        var level = fromLiveFolder ? RealLevel() : CurrentLevel;
         if (Insert(level, level.Count, [copy]).Count == 0)
             return;
         Save();
-        ShowModal(() => System.Windows.MessageBox.Show(this,
-            $"\"{copy.Name}\" is now in the list{(level == _root ? "" : ", in the sub-folder that holds this folder")}.",
+        var where = level == _root ? "" : fromLiveFolder ? ", in the sub-folder that holds this folder" : ", in this sub-folder";
+        ShowModal(() => System.Windows.MessageBox.Show(this, $"\"{copy.Name}\" is now in the list{where}.",
             "pLaunch", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information));
+    }
+
+    /// <summary>A saved item for something made on the fly, named like an item added by hand.</summary>
+    static LaunchItem? SavedCopy(LaunchItem live)
+    {
+        switch (live.Kind)
+        {
+            case ItemKind.File or ItemKind.Folder:
+                // A network path is not probed (it can hang): taken as it is
+                var copy = Launcher.IsNetworkPath(live.Target)
+                    ? new LaunchItem { Kind = live.Kind, Target = live.Target, Name = ItemFactory.FileDisplayName(live.Target.TrimEnd('\\')) }
+                    : ItemFactory.FromPath(live.Target);
+                if (copy != null && live.Arguments is { Length: > 0 } arguments)
+                {
+                    // "ping 1.1.1.1" from the search box: the command with what was typed after it
+                    copy.Arguments = arguments;
+                    copy.WorkingDirectory = live.WorkingDirectory;
+                    copy.Name += " " + arguments;
+                }
+                return copy;
+            case ItemKind.Url:
+                return ItemFactory.FromUrl(live.Target);
+            case ItemKind.Shell:
+                return ItemFactory.FromShell(live.Target, null);
+            default:
+                return null;
+        }
     }
 }

@@ -15,7 +15,8 @@ public static class Launcher
     };
 
     public static bool CanRunAsAdmin(LaunchItem item) =>
-        item.Kind == ItemKind.File && ElevatableExtensions.Contains(Path.GetExtension(item.Target));
+        item.Kind == ItemKind.Command
+        || (item.Kind == ItemKind.File && ElevatableExtensions.Contains(Path.GetExtension(item.Target)));
 
     public static bool HasLocation(LaunchItem item) => item.Kind is ItemKind.File or ItemKind.Folder;
 
@@ -48,9 +49,23 @@ public static class Launcher
         }
     }
 
-    /// <summary>Starts the item; returns false when the user cancelled an elevation prompt.</summary>
-    public static bool Launch(LaunchItem item, bool asAdmin = false)
+    /// <summary>
+    /// Starts the item; returns false when the user cancelled an elevation prompt. A program set to
+    /// "switch to it" is brought to the front when running, unless <paramref name="newWindow"/>. A text
+    /// snippet is copied and, when <paramref name="paste"/> and the item say so, pasted into the window
+    /// that gets the focus next.
+    /// </summary>
+    public static bool Launch(LaunchItem item, bool asAdmin = false, bool newWindow = false, bool paste = true)
     {
+        if (item.Kind == ItemKind.Text)
+        {
+            CopyText(item.Target);
+            if (paste && item.PasteText)
+                LastPaste = PasteIntoActiveWindowAsync();
+            return true;
+        }
+        if (item.SwitchToRunning && !asAdmin && !newWindow && RunningApps.TryActivate(item))
+            return true;
         // Let the started app (or an already running one that receives the file/URL) take the foreground
         NativeMethods.AllowSetForegroundWindow(NativeMethods.ASFW_ANY);
         try
@@ -64,11 +79,113 @@ public static class Launcher
         }
     }
 
+    /// <summary>The paste of the last snippet launched (tests wait for it).</summary>
+    internal static Task LastPaste { get; private set; } = Task.CompletedTask;
+
+    static void CopyText(string text)
+    {
+        try
+        {
+            // copy: true = the text stays on the clipboard after this process exits (jump list launches)
+            // Saved with \n line ends; Windows programs expect \r\n on the clipboard
+            System.Windows.Clipboard.SetDataObject(text.Replace("\r\n", "\n").Replace("\n", "\r\n"), copy: true);
+        }
+        catch (System.Runtime.InteropServices.ExternalException ex)
+        {
+            throw new InvalidOperationException("Another program is holding the clipboard. Try again.", ex);
+        }
+    }
+
+    /// <summary>
+    /// Ctrl+V into the window that has the focus once pLaunch is out of the way: after the keys of the
+    /// shortcut that launched the snippet are released (Ctrl+Alt+V would be something else) and the popup
+    /// has given the focus back. Never into pLaunch itself, the taskbar or the desktop.
+    /// </summary>
+    static Task PasteIntoActiveWindowAsync() => Task.Run(() =>
+    {
+        long deadline = Environment.TickCount64 + 3000;
+        bool Ready()
+        {
+            var foreground = WindowInterop.GetForegroundWindow();
+            if (foreground == IntPtr.Zero || WindowInterop.ModifiersDown())
+                return false;
+            WindowInterop.GetWindowThreadProcessId(foreground, out var pid);
+            return pid != Environment.ProcessId;
+        }
+        while (!Ready())
+        {
+            if (Environment.TickCount64 > deadline)
+                return;
+            Thread.Sleep(20);
+        }
+        Thread.Sleep(80); // the window that just got the focus settles (its caret, its input field)
+        if (Ready() && !WindowInterop.IsShellWindow(WindowInterop.GetForegroundWindow()))
+            WindowInterop.SendPaste();
+    });
+
+    /// <summary>What runs a command: cmd.exe, Windows PowerShell or PowerShell 7.</summary>
+    public static string CommandHost(CommandShell shell) => shell switch
+    {
+        CommandShell.PowerShell => Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"),
+        CommandShell.Pwsh => PwshPath ?? "pwsh.exe",
+        _ => Environment.GetEnvironmentVariable("ComSpec") is { Length: > 0 } comspec ? comspec : Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+    };
+
+    static readonly Lazy<string?> Pwsh = new(() => RunSuggestions.ResolveCommand("pwsh.exe")
+        ?? new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 }
+            .Select(f => Path.Combine(Environment.GetFolderPath(f), @"PowerShell\7\pwsh.exe")).FirstOrDefault(File.Exists));
+
+    /// <summary>PowerShell 7 (pwsh.exe), when installed.</summary>
+    public static string? PwshPath => Pwsh.Value;
+
+    /// <summary>
+    /// The host's arguments for a command. cmd runs the lines one after the other ("a &amp; b"); /s keeps
+    /// the quotes inside the command as they are. PowerShell gets it Base64-encoded, so no quoting can
+    /// break it, and scripts may run whatever the execution policy says.
+    /// </summary>
+    internal static string CommandArguments(LaunchItem item)
+    {
+        var lines = item.Target.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        if (item.Shell == CommandShell.Cmd)
+            return $"/s {(item.KeepOpen ? "/k" : "/c")} \"{string.Join(" & ", lines)}\"";
+        var script = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(string.Join("\n", lines)));
+        return $"-NoLogo {(item.KeepOpen ? "-NoExit " : "")}-ExecutionPolicy Bypass -EncodedCommand {script}";
+    }
+
+    static ProcessStartInfo CreateCommandStartInfo(LaunchItem item, bool asAdmin)
+    {
+        bool admin = asAdmin || item.RunAsAdmin;
+        // Hidden and not elevated: no console at all (a console handed to Windows Terminal could still
+        // show). An elevated one goes through the shell, which is asked to hide it.
+        bool hidden = item.StartWindow == StartWindow.Hidden && !item.KeepOpen;
+        var psi = new ProcessStartInfo(CommandHost(item.Shell), CommandArguments(item))
+        {
+            UseShellExecute = admin || !hidden,
+            CreateNoWindow = hidden && !admin,
+            WorkingDirectory = item.WorkingDirectory is { Length: > 0 } folder
+                ? Environment.ExpandEnvironmentVariables(folder)
+                : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            WindowStyle = hidden ? ProcessWindowStyle.Hidden : WindowStyleOf(item.StartWindow),
+        };
+        if (admin)
+            psi.Verb = "runas";
+        return psi;
+    }
+
+    static ProcessWindowStyle WindowStyleOf(StartWindow window) => window switch
+    {
+        StartWindow.Minimized => ProcessWindowStyle.Minimized,
+        StartWindow.Maximized => ProcessWindowStyle.Maximized,
+        _ => ProcessWindowStyle.Normal,
+    };
+
     internal static ProcessStartInfo CreateStartInfo(LaunchItem item, bool asAdmin = false)
     {
         // shell:AppsFolder\<AUMID> and ::{CLSID} names are resolved by Explorer
         if (item.Kind == ItemKind.Shell)
             return new ProcessStartInfo("explorer.exe", Quote(item.Target));
+        if (item.Kind == ItemKind.Command)
+            return CreateCommandStartInfo(item, asAdmin);
 
         var psi = new ProcessStartInfo(item.Target) { UseShellExecute = true, Arguments = item.Arguments ?? "" };
         if (item.WorkingDirectory is { Length: > 0 } folder)
@@ -80,12 +197,7 @@ public static class Launcher
         if (asAdmin || (item.RunAsAdmin && CanRunAsAdmin(item)))
             psi.Verb = "runas";
         // Passed to the program as its first show command; some programs ignore it
-        psi.WindowStyle = item.StartWindow switch
-        {
-            StartWindow.Minimized => ProcessWindowStyle.Minimized,
-            StartWindow.Maximized => ProcessWindowStyle.Maximized,
-            _ => ProcessWindowStyle.Normal,
-        };
+        psi.WindowStyle = WindowStyleOf(item.StartWindow);
         return psi;
     }
 
@@ -113,7 +225,8 @@ public static class Launcher
             }
             try
             {
-                if (Launch(item))
+                // Several snippets pasted at once would race for the clipboard: they are only copied
+                if (Launch(item, paste: false))
                 {
                     RecordLaunch(item);
                     started++;

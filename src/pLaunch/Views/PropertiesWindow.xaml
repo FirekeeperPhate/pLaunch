@@ -50,6 +50,10 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.Resources>
                 <Style TargetType="TextBlock" x:Key="FieldLabel">
@@ -69,37 +73,56 @@
             <Button x:Name="BrowseTargetButton" Grid.Row="1" Grid.Column="2" Margin="8,0,0,8" Content="&#x2026;"
                     ToolTip="Browse" Click="BrowseTarget_Click" />
 
-            <TextBlock x:Name="ArgumentsLabel" Grid.Row="2" Text="Arguments" Style="{StaticResource FieldLabel}" />
-            <TextBox x:Name="ArgumentsBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" />
+            <TextBlock x:Name="ShellLabel" Grid.Row="2" Text="Run with" Style="{StaticResource FieldLabel}" />
+            <ComboBox x:Name="ShellBox" Grid.Row="2" Grid.Column="1" Margin="0,0,0,8" MinWidth="180" HorizontalAlignment="Left">
+                <ComboBoxItem Content="Command Prompt (cmd)" />
+                <ComboBoxItem Content="Windows PowerShell" />
+                <ComboBoxItem x:Name="PwshItem" Content="PowerShell 7" />
+            </ComboBox>
 
-            <TextBlock x:Name="StartInLabel" Grid.Row="3" Text="Start in" Style="{StaticResource FieldLabel}" />
-            <TextBox x:Name="StartInBox" Grid.Row="3" Grid.Column="1"
+            <TextBlock x:Name="ArgumentsLabel" Grid.Row="3" Text="Arguments" Style="{StaticResource FieldLabel}" />
+            <TextBox x:Name="ArgumentsBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" />
+
+            <TextBlock x:Name="StartInLabel" Grid.Row="4" Text="Start in" Style="{StaticResource FieldLabel}" />
+            <TextBox x:Name="StartInBox" Grid.Row="4" Grid.Column="1"
                      ToolTip="Empty: the folder of the target. Environment variables such as %USERPROFILE% work." />
-            <Button x:Name="BrowseStartInButton" Grid.Row="3" Grid.Column="2" Margin="8,0,0,8" Content="&#x2026;"
+            <Button x:Name="BrowseStartInButton" Grid.Row="4" Grid.Column="2" Margin="8,0,0,8" Content="&#x2026;"
                     ToolTip="Browse" Click="BrowseStartIn_Click" />
 
-            <TextBlock x:Name="StartWindowLabel" Grid.Row="4" Text="Window" Style="{StaticResource FieldLabel}" />
-            <ComboBox x:Name="StartWindowBox" Grid.Row="4" Grid.Column="1" Margin="0,0,0,8" MinWidth="180"
+            <TextBlock x:Name="StartWindowLabel" Grid.Row="5" Text="Window" Style="{StaticResource FieldLabel}" />
+            <ComboBox x:Name="StartWindowBox" Grid.Row="5" Grid.Column="1" Margin="0,0,0,8" MinWidth="180"
                       HorizontalAlignment="Left" ToolTip="How the program's window opens (some programs ignore it)">
                 <ComboBoxItem Content="Normal" />
                 <ComboBoxItem Content="Minimized" />
                 <ComboBoxItem Content="Maximized" />
+                <ComboBoxItem x:Name="HiddenWindowItem" Content="Hidden (no window)" />
             </ComboBox>
 
-            <TextBlock x:Name="HotkeyLabel" Grid.Row="5" Text="Shortcut" Style="{StaticResource FieldLabel}" />
-            <DockPanel x:Name="HotkeyPanel" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
+            <TextBlock x:Name="HotkeyLabel" Grid.Row="6" Text="Shortcut" Style="{StaticResource FieldLabel}" />
+            <DockPanel x:Name="HotkeyPanel" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
                        ToolTip="Opens the item from anywhere, without opening pLaunch">
                 <CheckBox x:Name="HotkeyWinBox" DockPanel.Dock="Left" Margin="0,0,10,0" VerticalAlignment="Center" Content="Win +" Click="HotkeyWinBox_Click" />
                 <controls:HotkeyBox x:Name="HotkeyBox" />
             </DockPanel>
 
-            <CheckBox x:Name="ShowContentsBox" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
+            <CheckBox x:Name="ShowContentsBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
                       Content="Show the folder's content inside pLaunch (a click opens it here)" />
 
-            <CheckBox x:Name="RunAsAdminBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
+            <CheckBox x:Name="SwitchBox" Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
+                      Content="If it is already open, bring its window to the front"
+                      ToolTip="Right click → Open a new window starts another one anyway" />
+
+            <CheckBox x:Name="KeepOpenBox" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
+                      Content="Keep the window open when the command ends" />
+
+            <CheckBox x:Name="PasteBox" Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
+                      Content="Also paste it into the window you were using"
+                      ToolTip="Off: a click only copies it, to paste it yourself" />
+
+            <CheckBox x:Name="RunAsAdminBox" Grid.Row="11" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
                       Content="Always run as administrator" />
 
-            <TextBlock x:Name="UsageText" Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0" FontSize="12"
+            <TextBlock x:Name="UsageText" Grid.Row="12" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0" FontSize="12"
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
         </Grid>
 

@@ -81,7 +81,8 @@ public static class Program
             return 1;
         try
         {
-            if (Launcher.Launch(item))
+            // A snippet is only copied: after a jump list click the focus is on the taskbar, not in a text field
+            if (Launcher.Launch(item, paste: false))
                 CountLaunch(profile, store, data, item);
             return 0;
         }

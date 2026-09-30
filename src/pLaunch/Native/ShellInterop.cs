@@ -88,6 +88,52 @@ internal static class ShellInterop
         finally { PropVariantClear(ref variant); }
     }
 
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    static extern int SHGetPropertyStoreFromParsingName(string path, IntPtr bindContext, int flags, ref Guid iid,
+        [MarshalAs(UnmanagedType.Interface)] out IPropertyStore? store);
+
+    /// <summary>The AppUserModelID a window groups under on the taskbar, when it sets one (Store apps, Chrome...).</summary>
+    public static string? GetWindowAppId(IntPtr hwnd)
+    {
+        var iid = typeof(IPropertyStore).GUID;
+        return SHGetPropertyStoreForWindow(hwnd, ref iid, out var store) == 0 ? ReadString(store, IdKey) : null;
+    }
+
+    /// <summary>The AppUserModelID stored in a shortcut (apps started through a launcher, e.g. Update.exe).</summary>
+    public static string? GetShortcutAppId(string path)
+    {
+        var iid = typeof(IPropertyStore).GUID;
+        return SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, 0, ref iid, out var store) == 0 ? ReadString(store, IdKey) : null;
+    }
+
+    static string? ReadString(IPropertyStore? store, PROPERTYKEY key)
+    {
+        if (store == null)
+            return null;
+        try
+        {
+            store.GetValue(ref key, out var variant);
+            try
+            {
+                return variant.vt == 31 /* VT_LPWSTR */ && variant.pointer != IntPtr.Zero
+                    ? Marshal.PtrToStringUni(variant.pointer) is { Length: > 0 } s ? s : null
+                    : null;
+            }
+            finally
+            {
+                PropVariantClear(ref variant);
+            }
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(store);
+        }
+    }
+
     // ---- Icons ----
 
     [DllImport("shell32.dll", EntryPoint = "#62", CharSet = CharSet.Unicode)]

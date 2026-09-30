@@ -53,6 +53,7 @@ public partial class SettingsWindow : Window
         HotkeyStatus.Text = string.IsNullOrWhiteSpace(s.Hotkey) ? "No shortcut."
             : _popup.PopupHotkeyActive ? $"{s.Hotkey} opens this list."
             : $"{s.Hotkey} is not active: another program or list uses it. Choose another one.";
+        WebSearchBox.SelectedIndex = (int)s.WebSearch;
         ButtonIconPanel.Visibility = _popup.Profile.IsDefault ? Visibility.Collapsed : Visibility.Visible;
         DefaultButtonIconButton.IsEnabled = s.ButtonIconPath != null;
         DataFolderText.Text = "Data folder: " + AppConfig.DataDirectoryPath;
@@ -148,6 +149,12 @@ public partial class SettingsWindow : Window
     void TranslucentBox_Click(object sender, RoutedEventArgs e) => _popup.SetTranslucent(TranslucentBox.IsChecked == true);
 
     void WebIconsBox_Click(object sender, RoutedEventArgs e) => _popup.SetWebIcons(WebIconsBox.IsChecked == true);
+
+    void WebSearchBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_loading && WebSearchBox.SelectedIndex >= 0)
+            _popup.SetWebSearch((WebSearch)WebSearchBox.SelectedIndex);
+    }
 
     // ---------------------------------------------------------------- behavior
 
