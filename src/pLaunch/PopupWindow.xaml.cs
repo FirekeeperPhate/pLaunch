@@ -777,13 +777,15 @@ public partial class PopupWindow : Window
         if (items.Count > askAbove && ShowModal(() => MessageBox.Show(this, $"Open {items.Count} {what}?", "pLaunch",
                 MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)) != MessageBoxResult.Yes)
             return;
+        Cloak(true);
         var (started, errors) = Launcher.LaunchAll(items);
+        if (errors.Count == 0 && started > 0)
+            HidePopup();
+        Cloak(false);
         CountLaunches(items.Where(i => i.LastLaunched != null), alreadyRecorded: true);
         if (errors.Count > 0)
             ShowError(started > 0 ? $"{started} opened, {errors.Count} could not be opened:" : "Nothing could be opened:",
                 string.Join("\n", errors.Take(10)));
-        else if (started > 0)
-            HidePopup();
     }
 
     /// <summary>"Open all": the shortcuts directly inside a sub-folder (not those of its own sub-folders).</summary>
@@ -815,19 +817,36 @@ public partial class PopupWindow : Window
             ShowError($"\"{item.Name}\" was not found.", item.Model.Target);
             return;
         }
+        // Gone at once, while the shell starts the program (a Start menu app keeps it busy a moment)
+        Cloak(true);
         try
         {
             // Launch first: while pLaunch is still the foreground app the new window may take the focus
             if (Launcher.Launch(item.Model, asAdmin, newWindow))
             {
-                CountLaunches([item.Model]);
                 HidePopup();
+                CountLaunches([item.Model]);
             }
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
+            Cloak(false);
             ShowError($"Cannot open \"{item.Name}\".", ex.Message);
         }
+        finally
+        {
+            Cloak(false); // minimized by now, or back as it was (a declined elevation)
+        }
+    }
+
+    /// <summary>
+    /// Hides the popup and its menus without minimizing them: pLaunch stays the foreground app, so what
+    /// it starts meanwhile may still take the focus.
+    /// </summary>
+    void Cloak(bool cloaked)
+    {
+        foreach (var hwnd in _menus.Select(m => m.Handle).Prepend(_hwnd).Where(h => h != IntPtr.Zero))
+            NativeMethods.SetDwmInt(hwnd, NativeMethods.DWMWA_CLOAK, cloaked ? 1 : 0);
     }
 
     void OpenLocation(ItemViewModel item)

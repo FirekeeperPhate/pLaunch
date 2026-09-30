@@ -58,4 +58,30 @@ public class AppearanceTests
     {
         Assert.Equal(expected, Appearance.IsDark(new LauncherSettings { Theme = theme }, systemDark));
     }
+
+    // Pixels as the shell hands them: B, G, R, A
+    [Fact]
+    public void ShellIcons_WithStraightAlpha_AreNotReadAsPremultiplied()
+    {
+        // An icon's soft shadow: white at 25 % opacity. Premultiplied, it would show as a light grey patch.
+        byte[] icon = [255, 255, 255, 64, 0, 0, 200, 255, 0, 0, 0, 0];
+        Assert.Equal(PixelFormats.Bgra32, IconProvider.AlphaFormat(icon));
+        Assert.Equal(64, icon[3]); // the alpha is kept
+    }
+
+    [Fact]
+    public void ShellThumbnails_Premultiplied_StayPremultiplied()
+    {
+        byte[] thumbnail = [64, 64, 64, 64, 0, 0, 200, 255, 0, 0, 0, 0];
+        Assert.Equal(PixelFormats.Pbgra32, IconProvider.AlphaFormat(thumbnail));
+    }
+
+    [Fact]
+    public void OldIcons_WithoutAlpha_BecomeOpaque()
+    {
+        byte[] old = [10, 20, 30, 0, 0, 0, 0, 0];
+        Assert.Equal(PixelFormats.Bgra32, IconProvider.AlphaFormat(old));
+        Assert.Equal(255, old[3]);
+        Assert.Equal(255, old[7]);
+    }
 }

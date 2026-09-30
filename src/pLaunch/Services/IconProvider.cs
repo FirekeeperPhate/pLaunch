@@ -149,7 +149,7 @@ public static class IconProvider
 
     /// <summary>
     /// Copies a 32-bit DIB keeping its alpha channel (Imaging.CreateBitmapSourceFromHBitmap drops it).
-    /// The shell returns premultiplied pixels; old icons without alpha come back fully transparent.
+    /// Old icons without alpha come back fully transparent.
     /// </summary>
     static BitmapSource? FromHBitmap(IntPtr hbmp)
     {
@@ -176,19 +176,32 @@ public static class IconProvider
             NativeMethods.ReleaseDC(IntPtr.Zero, hdc);
         }
 
-        bool anyAlpha = false;
-        for (int i = 3; i < pixels.Length; i += 4)
+        var bitmap = BitmapSource.Create(w, h, 96, 96, AlphaFormat(pixels), null, pixels, w * 4);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    /// <summary>
+    /// How the alpha of 32-bit BGRA pixels from the shell is to be read. Icons come back with straight
+    /// alpha (the color as it is, however transparent the pixel), thumbnails premultiplied: read the wrong
+    /// way, the soft edges and shadows of icons show as a light, half opaque background. Only straight
+    /// alpha can have a color channel above the alpha. No alpha at all (old icons): made opaque.
+    /// </summary>
+    internal static PixelFormat AlphaFormat(byte[] pixels)
+    {
+        bool anyAlpha = false, straight = false;
+        for (int i = 0; i < pixels.Length; i += 4)
         {
-            if (pixels[i] != 0) { anyAlpha = true; break; }
+            byte alpha = pixels[i + 3];
+            anyAlpha |= alpha != 0;
+            straight |= pixels[i] > alpha || pixels[i + 1] > alpha || pixels[i + 2] > alpha;
         }
         if (!anyAlpha)
         {
             for (int i = 3; i < pixels.Length; i += 4)
                 pixels[i] = 255;
+            return PixelFormats.Bgra32;
         }
-
-        var bitmap = BitmapSource.Create(w, h, 96, 96, PixelFormats.Pbgra32, null, pixels, w * 4);
-        bitmap.Freeze();
-        return bitmap;
+        return straight ? PixelFormats.Bgra32 : PixelFormats.Pbgra32;
     }
 }

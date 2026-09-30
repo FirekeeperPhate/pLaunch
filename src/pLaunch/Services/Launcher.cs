@@ -181,9 +181,11 @@ public static class Launcher
 
     internal static ProcessStartInfo CreateStartInfo(LaunchItem item, bool asAdmin = false)
     {
-        // shell:AppsFolder\<AUMID> and ::{CLSID} names are resolved by Explorer
+        // shell:AppsFolder\<AUMID> and ::{CLSID} names: the shell opens them itself. Much sooner than
+        // through a new explorer.exe, which starts a whole process first (a Store app came up in 0.2-0.4 s
+        // instead of 0.4-0.8 s).
         if (item.Kind == ItemKind.Shell)
-            return new ProcessStartInfo("explorer.exe", Quote(item.Target));
+            return new ProcessStartInfo(item.Target) { UseShellExecute = true };
         if (item.Kind == ItemKind.Command)
             return CreateCommandStartInfo(item, asAdmin);
 
