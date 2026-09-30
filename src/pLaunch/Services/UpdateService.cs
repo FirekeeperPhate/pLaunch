@@ -18,13 +18,13 @@ public enum UpdateCheckStatus
 }
 
 /// <summary>
-/// Updates from the GitHub releases of MarcoTrombetta/pLaunch, like pViewer: the latest release's
+/// Updates from the GitHub releases of FirekeeperPhate/pLaunch, like pViewer: the latest release's
 /// installer of the same edition (Full or Light) is downloaded, checked against its SHA-256 digest and
 /// run silently. Every running list closes first and is started again by the installer.
 /// </summary>
 public static class UpdateService
 {
-    const string LatestReleaseApi = "https://api.github.com/repos/MarcoTrombetta/pLaunch/releases/latest";
+    const string LatestReleaseApi = "https://api.github.com/repos/FirekeeperPhate/pLaunch/releases/latest";
     static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
 
     // Lazy: a static field initialized here would run before CurrentVersion below (textual order)
@@ -101,7 +101,7 @@ public static class UpdateService
                 return null;
             var page = root.TryGetProperty("html_url", out var p) && Uri.TryCreate(p.GetString(), UriKind.Absolute, out var pageUri)
                 ? pageUri
-                : new Uri("https://github.com/MarcoTrombetta/pLaunch/releases");
+                : new Uri("https://github.com/FirekeeperPhate/pLaunch/releases");
             var notes = root.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "";
             return new UpdateInfo(version, expected, download, digest[7..].ToLowerInvariant(), page, notes);
         }

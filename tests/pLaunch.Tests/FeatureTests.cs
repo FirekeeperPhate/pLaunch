@@ -150,7 +150,7 @@ public sealed class FeatureTests : IDisposable
 
     static string Release(string tag, string assetName, string? digest = "sha256:ABCDEF", bool prerelease = false) => $$"""
         {
-          "tag_name": "{{tag}}", "html_url": "https://github.com/MarcoTrombetta/pLaunch/releases/tag/{{tag}}",
+          "tag_name": "{{tag}}", "html_url": "https://github.com/FirekeeperPhate/pLaunch/releases/tag/{{tag}}",
           "draft": false, "prerelease": {{(prerelease ? "true" : "false")}}, "body": "Notes",
           "assets": [
             { "name": "{{assetName}}", "browser_download_url": "https://github.com/x/{{assetName}}"{{(digest == null ? "" : $", \"digest\": \"{digest}\"")}} },
