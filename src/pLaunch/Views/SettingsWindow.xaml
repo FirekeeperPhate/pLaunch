@@ -94,6 +94,13 @@
                 </DockPanel>
                 <TextBlock x:Name="HotkeyStatus" Margin="0,0,0,6" FontSize="12" TextWrapping="Wrap"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <TextBlock Text="Sub-folders open" Style="{StaticResource Label}" />
+                    <ComboBox x:Name="SubFoldersBox" MinWidth="170" SelectionChanged="SubFoldersBox_SelectionChanged">
+                        <ComboBoxItem Content="In a menu beside the list" />
+                        <ComboBoxItem Content="Inside the list" />
+                    </ComboBox>
+                </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
                             ToolTip="The search box offers a web search for what you typed, below the list's own results">
                     <TextBlock Text="Search the web with" Style="{StaticResource Label}" />

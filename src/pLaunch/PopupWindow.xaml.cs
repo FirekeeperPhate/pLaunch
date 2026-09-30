@@ -96,6 +96,7 @@ public partial class PopupWindow : Window
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         Closed += (_, _) =>
         {
+            CloseMenus();
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
             _hotkeys?.Dispose();
         };
@@ -132,6 +133,7 @@ public partial class PopupWindow : Window
         ShowActivated = !minimized;
         Show();
         ShowActivated = true;
+        AddTaskbarButton();
         QueueIconLoad();
         ScheduleJumpList();
         if (!minimized)
@@ -176,6 +178,7 @@ public partial class PopupWindow : Window
                 break;
             case WindowState.Minimized:
                 _hoverWatch.Stop();
+                CloseMenus();
                 CommitRename();
                 ClearDropMarkers();
                 SetSpringTarget(null);
@@ -245,7 +248,8 @@ public partial class PopupWindow : Window
 
     bool IsCursorOverWindow() =>
         NativeMethods.GetCursorPos(out var p) && NativeMethods.GetWindowRect(_hwnd, out var r)
-        && p.X >= r.Left && p.X < r.Right && p.Y >= r.Top && p.Y < r.Bottom;
+        && p.X >= r.Left && p.X < r.Right && p.Y >= r.Top && p.Y < r.Bottom
+        || IsCursorOverMenu();
 
     /// <summary>Sizes the popup to its content and puts it against the taskbar, near <see cref="_anchor"/>.</summary>
     void Place()
@@ -295,6 +299,8 @@ public partial class PopupWindow : Window
         source.AddHook(WndProc);
         source.CompositionTarget.BackgroundColor = Colors.Transparent;
 
+        TaskbarTab.HideFromSwitchers(_hwnd); // a launcher, not a window to switch to; the button comes back in Start
+        TaskbarTab.SetOffscreenMinimizedPosition(_hwnd);
         NativeMethods.SetDwmInt(_hwnd, NativeMethods.DWMWA_TRANSITIONS_FORCEDISABLED, 1); // no minimize/restore animation
         NativeMethods.SetDwmInt(_hwnd, NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE, NativeMethods.DWMWCP_ROUND);
         // No acrylic before Windows 11 22H2: a solid background then
@@ -367,7 +373,31 @@ public partial class PopupWindow : Window
         }
         if (msg == NativeMethods.WM_SYSCOMMAND && ((int)wParam & 0xFFF0) == NativeMethods.SC_MAXIMIZE)
             handled = true;
+        else if (msg == TaskbarTab.TaskbarCreatedMessage)
+            AddTaskbarButton(); // Explorer restarted: the shell forgot the button it was given
+        TaskbarTab.KeepMinimizedOffscreen(hwnd, msg, lParam); // no little title bar above the taskbar
         return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// The popup is a tool window (not in Alt+Tab or Win+Tab), so its taskbar button is asked for. The
+    /// shell handles a new window asynchronously and would drop a button given too early: it is asked
+    /// for once the window is shown, and once more a moment later (a second request changes nothing).
+    /// </summary>
+    void AddTaskbarButton()
+    {
+        if (_hwnd == IntPtr.Zero)
+            return;
+        foreach (var delay in new[] { 300, 1500 })
+        {
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(delay) };
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                TaskbarTab.Add(_hwnd);
+            };
+            timer.Start();
+        }
     }
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
@@ -415,7 +445,9 @@ public partial class PopupWindow : Window
         {
             // Results from every sub-folder, best first; the tooltip tells where each one lives. Around
             // them what the text itself can open: a path or an address first, a command or a web search last.
-            var (first, last) = RunSuggestions.For(_search, _settings.WebSearch);
+            // What the text opens comes from a background look-up (it touches the disk): until it arrives
+            // only the web search is there
+            var (first, last) = _suggestions.Text == _search ? (_suggestions.First, _suggestions.Last) : ([], []);
             target = first.Select(ViewModelFor).ToList();
             foreach (var (item, location) in ItemSearch.Find(_root, _search))
             {
@@ -424,6 +456,8 @@ public partial class PopupWindow : Window
                 target.Add(vm);
             }
             target.AddRange(last.Select(ViewModelFor));
+            if (RunSuggestions.WebSearchFor(_search, _settings.WebSearch) is { } webSearch)
+                target.Add(ViewModelFor(webSearch));
         }
         else
         {
@@ -433,23 +467,13 @@ public partial class PopupWindow : Window
             foreach (var vm in target)
                 vm.Location = null;
         }
-        for (int i = 0; i < target.Count; i++)
+        foreach (var vm in target)
         {
-            var vm = target[i];
             vm.DropMarker = DropMarker.None;
             if (vm.IsGroup)
                 vm.RefreshChildInfo();
-            if (i < _items.Count && _items[i] == vm)
-                continue;
-            // Positions before i already match the target, so a view model still present is further down
-            int at = _items.IndexOf(vm);
-            if (at > i)
-                _items.Move(at, i);
-            else
-                _items.Insert(i, vm);
         }
-        while (_items.Count > target.Count)
-            _items.RemoveAt(_items.Count - 1);
+        SyncItems(_items, target);
 
         Header.Visibility = _path.Count > 0 && !IsSearching ? Visibility.Visible : Visibility.Collapsed;
         SearchBar.Visibility = IsSearching || SearchBox.IsKeyboardFocused ? Visibility.Visible : Visibility.Collapsed;
@@ -473,6 +497,7 @@ public partial class PopupWindow : Window
             Place();
             RefreshRunning();
         }
+        RefreshMenus();
     }
 
     ItemViewModel ViewModelFor(LaunchItem item)
@@ -570,13 +595,16 @@ public partial class PopupWindow : Window
     /// <summary>A new folder or separator: after the selected item, or at the end.</summary>
     void InsertNew(LaunchItem item)
     {
-        var level = CurrentLevel;
-        int index = List.SelectedItem is ItemViewModel selected && level.IndexOf(selected.Model) is >= 0 and var at
-            ? at + 1
-            : level.Count;
-        level.Insert(index, item);
+        InsertAfter(CurrentLevel, (List.SelectedItem as ItemViewModel)?.Model, item);
         Save();
         Refresh(item.Id);
+    }
+
+    /// <summary>Puts <paramref name="item"/> right after <paramref name="after"/> in <paramref name="level"/> (at the end when it is not there).</summary>
+    static void InsertAfter(List<LaunchItem> level, LaunchItem? after, LaunchItem item)
+    {
+        int index = after != null && level.IndexOf(after) is >= 0 and var at ? at + 1 : level.Count;
+        level.Insert(index, item);
     }
 
     void NewFolder()
@@ -609,7 +637,8 @@ public partial class PopupWindow : Window
         Save();
         Refresh();
         // The next item takes the selection; separators are skipped (a second Del must not remove one)
-        int next = NextSelectable(displayIndex);
+        // (not when it was removed from a menu)
+        int next = displayIndex >= 0 ? NextSelectable(displayIndex) : -1;
         if (next >= 0)
         {
             List.SelectedIndex = next;
@@ -644,16 +673,25 @@ public partial class PopupWindow : Window
     /// <summary>Moves an item of any level to the shown level, before the item shown at <paramref name="displayIndex"/>.</summary>
     void MoveTo(LaunchItem item, int displayIndex)
     {
-        if (_path.Contains(item))
-            return; // a folder cannot go inside itself
         var anchor = displayIndex >= 0 && displayIndex < _items.Count ? _items[displayIndex].Model : null;
-        if (anchor == item || ItemTree.FindContainer(_root, item.Id) is not { } source)
-            return;
-        var level = CurrentLevel;
+        if (MoveBefore(item, _path.LastOrDefault(), CurrentLevel, anchor))
+            Refresh(item.Id);
+    }
+
+    /// <summary>
+    /// Moves an item of any level into <paramref name="level"/> (the content of <paramref name="owner"/>,
+    /// null = the top), before <paramref name="anchor"/> or at the end, and saves. False when it cannot go
+    /// there: a folder never goes inside itself or one of its own sub-folders.
+    /// </summary>
+    bool MoveBefore(LaunchItem item, LaunchItem? owner, List<LaunchItem> level, LaunchItem? anchor)
+    {
+        if (anchor == item || (owner != null && ItemTree.IsSelfOrInside(owner, item))
+            || ItemTree.FindContainer(_root, item.Id) is not { } source)
+            return false;
         source.Remove(item);
-        level.Insert(anchor == null ? level.Count : level.IndexOf(anchor), item);
+        level.Insert(anchor == null || !level.Contains(anchor) ? level.Count : level.IndexOf(anchor), item);
         Save();
-        Refresh(item.Id);
+        return true;
     }
 
     void MoveInto(LaunchItem item, LaunchItem group)
@@ -709,7 +747,9 @@ public partial class PopupWindow : Window
     /// <summary>A click or Enter: sub-folders and live folders open inside, shortcuts launch, separators do nothing.</summary>
     void Open(ItemViewModel item, bool asAdmin = false)
     {
-        if (item.IsNavigable)
+        if (item.IsNavigable && MenuMode)
+            ToggleMenu(item, level: 0); // a folder in a menu opens through the menu's own handlers
+        else if (item.IsNavigable)
             OpenGroup(item.Model);
         else if (!item.IsSeparator)
             Launch(item, asAdmin);
@@ -833,11 +873,13 @@ public partial class PopupWindow : Window
     /// Requests the icons still missing or of another size (DPI or item size change). Items without an
     /// icon are retried on every call, at most one request each at a time.
     /// </summary>
-    void QueueIconLoad()
+    void QueueIconLoad(IEnumerable<ItemViewModel>? items = null)
     {
         int pixels = IconPixels;
-        foreach (var item in _items)
+        foreach (var item in items ?? _items)
         {
+            if (RunSuggestions.IsNetworkSuggestion(item.Model))
+                continue; // a glyph: the path is still being typed, and asking a server can take long
             if (item.Model.HasShellIcon && !item.IconPending && (item.Icon == null || item.IconPixels != pixels))
                 LoadIcon(item, pixels);
         }
@@ -909,6 +951,8 @@ public partial class PopupWindow : Window
     /// <summary>The icons-only rename box follows its tile; once the tile scrolls out of view the rename is done.</summary>
     void OnListScrolled(object sender, ScrollChangedEventArgs e)
     {
+        if (e.VerticalChange != 0)
+            RepositionMenus(0); // they follow their folder's row
         if (e.VerticalChange == 0 || OverlayRenameHost.Visibility != Visibility.Visible
             || OverlayRenameHost.DataContext is not ItemViewModel item
             || List.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem container)
@@ -979,6 +1023,12 @@ public partial class PopupWindow : Window
             && PresentationSource.FromDependencyObject(source) is { } origin
             && origin != PresentationSource.FromVisual(this))
             return;
+        // An open menu (it never has the focus) gets the arrows, Enter, Esc...
+        if (_menus.Count > 0 && HandleMenuKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
         var selected = List.SelectedItem as ItemViewModel;
         switch (e.Key)
         {
@@ -1003,8 +1053,11 @@ public partial class PopupWindow : Window
             case Key.Left when _settings.View == ViewMode.List && _path.Count > 0:
                 GoBack();
                 break;
-            case Key.Right when _settings.View == ViewMode.List && selected is { IsGroup: true }:
-                OpenGroup(selected.Model);
+            case Key.Right when _settings.View == ViewMode.List && selected is { IsNavigable: true }:
+                if (MenuMode)
+                    OpenMenu(selected, 0, selectFirst: true);
+                else
+                    OpenGroup(selected.Model);
                 break;
             case Key.Enter when List.SelectedItems.Count > 1:
                 LaunchMany(SelectedItems().Select(i => i.Model).Where(m => m.IsLaunchable).ToList(), "shortcuts");
@@ -1089,6 +1142,8 @@ public partial class PopupWindow : Window
         _pressed = ItemAt(e.OriginalSource);
         if (_pressed?.IsEditing == true)
             _pressed = null;
+        if (_pressed == null && !IsInScrollBar(e.OriginalSource))
+            CloseMenus(); // a click on nothing in particular closes them, like any menu
         _pressPoint = e.GetPosition(List);
         if (_pressed?.IsSeparator == true)
             e.Handled = true; // draggable, but never selected
@@ -1097,7 +1152,10 @@ public partial class PopupWindow : Window
     void List_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (_pressed == null || e.LeftButton != MouseButtonState.Pressed)
+        {
+            ScheduleMenuHover(ItemAt(e.OriginalSource), 0); // switches an open menu to another sub-folder
             return;
+        }
         var delta = e.GetPosition(List) - _pressPoint;
         if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance
             && Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance)
@@ -1244,9 +1302,47 @@ public partial class PopupWindow : Window
             return;
         }
 
+        AddOpenCommands(menu, item);
+        if (item.Model.IsLive)
+        {
+            // An entry of a live folder or a search suggestion is not saved: it can only be copied into the list
+            if (item.Model.Id != RunSuggestions.WebSearchId)
+            {
+                menu.Items.Add(new Separator());
+                menu.Items.Add(CreateMenuItem("Add to pLaunch", () => AddLiveCopy(item.Model), "\xE710"));
+            }
+            return;
+        }
+        // Inserted right after this item (it is the selected one)
+        AddEditCommands(menu, item, () => StartRename(item), NewFolder, NewSeparator);
+    }
+
+    /// <summary>
+    /// The second part of a saved item's menu: editing it and adding next to it (also used by the side
+    /// menus, which rename in a dialog and add into their own folder).
+    /// </summary>
+    void AddEditCommands(ContextMenu menu, ItemViewModel item, Action rename, Action newFolder, Action newSeparator)
+    {
+        menu.Items.Add(new Separator());
+        menu.Items.Add(CreateMenuItem("Rename", rename, "\xE8AC", "F2"));
+        menu.Items.Add(CreateMenuItem("Remove", () => Remove(item), "\xE74D", "Del"));
+        menu.Items.Add(CreateMenuItem("Properties\x2026", () => ShowProperties(item), "\xE946", "Alt+Enter"));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(CreateMenuItem("New folder here", newFolder, "\xE8F4"));
+        menu.Items.Add(CreateMenuItem("Separator here", newSeparator, "\xE76F"));
+    }
+
+    /// <summary>
+    /// The first part of an item's menu: the ways to open it. Also used by the side menus;
+    /// <paramref name="level"/> says where the item is shown (0 = the popup's list, n = the n-th menu).
+    /// </summary>
+    void AddOpenCommands(ContextMenu menu, ItemViewModel item, int level = 0)
+    {
         var open = item.Model.Kind == ItemKind.Text
             ? CreateMenuItem(item.Model.PasteText ? "Paste" : "Copy", () => Open(item), item.Model.PasteText ? "\xE77F" : "\xE8C8")
-            : CreateMenuItem("Open", () => Open(item), item.IsNavigable ? "\xE838" : "\xE8A7");
+            : item.IsNavigable
+                ? CreateMenuItem("Open", () => OpenFolder(item, level), "\xE838")
+                : CreateMenuItem("Open", () => Open(item), "\xE8A7");
         open.FontWeight = FontWeights.SemiBold;
         menu.Items.Add(open);
         if (item.IsGroup && (item.Model.Children ?? []).Count(c => c.IsLaunchable) is var count and > 0)
@@ -1263,24 +1359,6 @@ public partial class PopupWindow : Window
             menu.Items.Add(CreateMenuItem("Run as administrator", () => Launch(item, asAdmin: true), "\xEA18", "Ctrl+Shift+Enter"));
         if (Launcher.HasLocation(item.Model))
             menu.Items.Add(CreateMenuItem("Open file location", () => OpenLocation(item), "\xE838"));
-        if (item.Model.IsLive)
-        {
-            // An entry of a live folder or a search suggestion is not saved: it can only be copied into the list
-            if (item.Model.Id != RunSuggestions.WebSearchId)
-            {
-                menu.Items.Add(new Separator());
-                menu.Items.Add(CreateMenuItem("Add to pLaunch", () => AddLiveCopy(item.Model), "\xE710"));
-            }
-            return;
-        }
-        menu.Items.Add(new Separator());
-        menu.Items.Add(CreateMenuItem("Rename", () => StartRename(item), "\xE8AC", "F2"));
-        menu.Items.Add(CreateMenuItem("Remove", () => Remove(item), "\xE74D", "Del"));
-        menu.Items.Add(CreateMenuItem("Properties\x2026", () => ShowProperties(item), "\xE946", "Alt+Enter"));
-        menu.Items.Add(new Separator());
-        // Inserted right after this item (it is the selected one)
-        menu.Items.Add(CreateMenuItem("New folder here", NewFolder, "\xE8F4"));
-        menu.Items.Add(CreateMenuItem("Separator here", NewSeparator, "\xE76F"));
     }
 
     void AddButton_Click(object sender, RoutedEventArgs e)
@@ -1553,23 +1631,26 @@ public partial class PopupWindow : Window
     /// Where a drop at <paramref name="position"/> (list coordinates) goes: into a sub-folder (the middle
     /// of it), or before the item at the returned index (rows: upper/lower half, tiles: left/right half).
     /// </summary>
-    (int Index, ItemViewModel? Into) HitTest(Point position)
+    (int Index, ItemViewModel? Into) HitTest(Point position) =>
+        HitTest(List, _items, position, rows: _settings.View == ViewMode.List);
+
+    /// <summary>The same for any list: the popup's, or a menu's (always rows).</summary>
+    (int Index, ItemViewModel? Into) HitTest(ListBox list, IList<ItemViewModel> items, Point position, bool rows)
     {
-        bool rows = _settings.View == ViewMode.List;
         // Only rows on screen: in a scrolled list the others still have containers (IsVisible is true for
         // them too), and a drop must never land next to an item the user cannot see
-        var boxes = new List<(ItemViewModel Item, Rect Rect)>(_items.Count);
-        for (int i = 0; i < _items.Count; i++)
+        var boxes = new List<(ItemViewModel Item, Rect Rect)>(items.Count);
+        for (int i = 0; i < items.Count; i++)
         {
-            if (List.ItemContainerGenerator.ContainerFromIndex(i) is not ListBoxItem container || !container.IsVisible)
+            if (list.ItemContainerGenerator.ContainerFromIndex(i) is not ListBoxItem container || !container.IsVisible)
                 continue;
-            var rect = new Rect(container.TranslatePoint(new Point(0, 0), List), new Size(container.ActualWidth, container.ActualHeight));
-            if (rect.Bottom > 0 && rect.Top < List.ActualHeight)
-                boxes.Add((_items[i], rect));
+            var rect = new Rect(container.TranslatePoint(new Point(0, 0), list), new Size(container.ActualWidth, container.ActualHeight));
+            if (rect.Bottom > 0 && rect.Top < list.ActualHeight)
+                boxes.Add((items[i], rect));
         }
         // Below the visible rows (the footer included) = at the end
-        if (boxes.Count == 0 || position.Y >= List.ActualHeight || position.Y >= boxes.Max(b => b.Rect.Bottom))
-            return (_items.Count, null);
+        if (boxes.Count == 0 || position.Y >= list.ActualHeight || position.Y >= boxes.Max(b => b.Rect.Bottom))
+            return (items.Count, null);
 
         // Tiles have 2 px margins: count the gap around each one as part of it
         var (hit, hitRect) = boxes.FirstOrDefault(b => (rows ? b.Rect : Rect.Inflate(b.Rect, 2, 2)).Contains(position));
@@ -1582,7 +1663,7 @@ public partial class PopupWindow : Window
             (hit, hitRect) = candidates.MinBy(b => DistanceTo(b.Rect, position));
         }
 
-        int index = _items.IndexOf(hit);
+        int index = items.IndexOf(hit);
         bool draggingThis = hit.Model.Id == _draggingId;
         if (hit.IsGroup && !draggingThis)
         {
@@ -1605,18 +1686,20 @@ public partial class PopupWindow : Window
         return Math.Sqrt(dx * dx + dy * dy);
     }
 
-    void ShowInsertMarker(int index)
+    /// <summary>The line where a drop goes, in the popup's list or in a menu's (<paramref name="items"/>).</summary>
+    void ShowInsertMarker(int index, IList<ItemViewModel>? items = null)
     {
+        items ??= _items;
         // In alphabetical order the position is not kept: no line would be honest
         if (_settings.Sort == SortMode.Alphabetical)
         {
             ClearDropMarkers();
             return;
         }
-        for (int i = 0; i < _items.Count; i++)
+        for (int i = 0; i < items.Count; i++)
         {
-            _items[i].DropMarker = i == index ? DropMarker.Before
-                : index == _items.Count && i == _items.Count - 1 ? DropMarker.After
+            items[i].DropMarker = i == index ? DropMarker.Before
+                : index == items.Count && i == items.Count - 1 ? DropMarker.After
                 : DropMarker.None;
         }
     }
@@ -1630,6 +1713,8 @@ public partial class PopupWindow : Window
     void ClearDropMarkers()
     {
         foreach (var item in _items)
+            item.DropMarker = DropMarker.None;
+        foreach (var item in _menus.SelectMany(m => m.Items))
             item.DropMarker = DropMarker.None;
     }
 
@@ -1650,7 +1735,12 @@ public partial class PopupWindow : Window
         _springTarget = null;
         ClearDropMarkers();
         if (target is ItemViewModel { IsGroup: true } group && _items.Contains(group))
-            OpenGroup(group.Model);
+        {
+            if (MenuMode)
+                OpenMenu(group, 0); // the drag goes on into the menu
+            else
+                OpenGroup(group.Model);
+        }
         else if (target == Header && _path.Count > 0)
             GoBack();
     }

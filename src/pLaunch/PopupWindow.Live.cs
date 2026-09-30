@@ -62,11 +62,14 @@ public partial class PopupWindow
             Refresh();
             RefreshMissing();
         }
+        if (_menus.Any(m => m.Folder.Kind == ItemKind.Folder && string.Equals(m.Folder.Target, path, StringComparison.OrdinalIgnoreCase)))
+            RefreshMenus();
     }
 
-    string LiveFolderHint()
+    /// <summary>What an empty live folder says: still reading, unreadable, or really empty (default: the one shown).</summary>
+    string LiveFolderHint(LaunchItem? folder = null)
     {
-        var path = _path[^1].Target;
+        var path = (folder ?? _path[^1]).Target;
         return _liveLoading.Contains(path) ? "Reading the folder\x2026"
             : _liveErrors.TryGetValue(path, out var error) ? $"This folder cannot be read.\n{error}"
             : "This folder is empty.";
@@ -88,12 +91,13 @@ public partial class PopupWindow
     /// A live entry or a search suggestion becomes a saved shortcut: in the list that holds the live
     /// folder, or in the level being shown.
     /// </summary>
-    void AddLiveCopy(LaunchItem live)
+    void AddLiveCopy(LaunchItem live, List<LaunchItem>? into = null)
     {
         if (SavedCopy(live) is not { } copy)
             return;
-        bool fromLiveFolder = InLiveFolder;
-        var level = fromLiveFolder ? RealLevel() : CurrentLevel;
+        // A live folder's menu says where its folder is; inside the popup the path does
+        bool fromLiveFolder = into != null || InLiveFolder;
+        var level = into ?? (fromLiveFolder ? RealLevel() : CurrentLevel);
         if (Insert(level, level.Count, [copy]).Count == 0)
             return;
         Save();

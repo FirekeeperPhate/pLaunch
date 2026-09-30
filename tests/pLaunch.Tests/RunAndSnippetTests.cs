@@ -102,6 +102,24 @@ public sealed class RunAndSnippetTests : IDisposable
         Assert.Empty(RunSuggestions.For("anything at all", WebSearch.Off).Last);
     }
 
+    [Fact]
+    public void Run_TheWebSearchIsSeparate_SoItShowsAtOnce()
+    {
+        Assert.Empty(RunSuggestions.Typed("anything at all").Last); // no disk look-up needed for it
+        Assert.Equal(RunSuggestions.WebSearchId, RunSuggestions.WebSearchFor("x", WebSearch.Bing)!.Id);
+        Assert.Null(RunSuggestions.WebSearchFor("x", WebSearch.Off));
+        Assert.Null(RunSuggestions.WebSearchFor("   ", WebSearch.Google));
+    }
+
+    [Fact]
+    public void Run_NetworkPathsAreOfferedWithoutAskingTheServer()
+    {
+        var open = Assert.Single(RunSuggestions.Typed(@"\\no-such-server-" + Guid.NewGuid().ToString("N")[..8] + @"\share").First);
+        Assert.True(RunSuggestions.IsNetworkSuggestion(open)); // no icon look-up while typing
+        Assert.False(RunSuggestions.IsNetworkSuggestion(Assert.Single(RunSuggestions.Typed(_dir).First)));
+        Assert.False(RunSuggestions.IsNetworkSuggestion(new LaunchItem { Kind = ItemKind.Folder, Target = @"\\server\share" })); // a saved item
+    }
+
     [Theory]
     [InlineData("ping 1.1.1.1", "ping", "1.1.1.1")]
     [InlineData("calc", "calc", null)]

@@ -26,11 +26,15 @@ shortcuts (programs, files, folders, web links, Store apps).
   hold there for a moment: the list opens and you drop into it. The *Add* button and **Ctrl+V** work too.
 - **Right click** an item: open, run as administrator, open file location, rename, remove, and add a
   sub-folder or a separator right after it. Drag items to reorder them.
-- **Sub-folders** (Add → New sub-folder) open inside the popup, with a back button. Drop an item on a
-  sub-folder to move it in; hold a drag over a sub-folder to open it, over the back button to go up;
-  drop on the back button to move an item up one level. **Separators** (Add → Separator) divide the list.
+- **Sub-folders** (Add → New sub-folder) open in a **menu beside the list**, as tall as their content,
+  like the old Quick Launch menus: resting the mouse on a sub-folder inside a menu opens the next one,
+  on anything else closes it; arrows, Right/Enter and Left/Esc work too. Right click in a menu: open,
+  rename, remove, properties, new folder or separator. Drop an item on a sub-folder to move it in, or into
+  its menu at a precise spot; holding a drag over a sub-folder opens it. In Settings they can open
+  **inside the list** instead, with a back button (drop on it to move an item up one level).
+  **Separators** (Add → Separator) divide the list.
 - **Live folders**: in a folder's Properties tick *Show the folder's content inside pLaunch*. The folder then
-  opens inside the popup like a sub-folder, showing what is on the disk right now (Downloads, a project
+  opens like a sub-folder, showing what is on the disk right now (Downloads, a project
   folder…). Its entries are read-only; right click → *Add to pLaunch* keeps a copy of one.
 - **… → View**: List, Tiles (big icon, name below) or Icons only (names in the tooltips).
   **… → Sort**: custom (drag to arrange), alphabetical or **most used** (pLaunch counts the launches) —
@@ -38,7 +42,8 @@ shortcuts (programs, files, folders, web links, Store apps).
   for when you switch back.
 - **… → Settings**: view, size, order, theme (System, Light, Dark), background (the Windows acrylic, a
   preset color or any color; *Translucent* lets a little of the acrylic show through), website icons,
-  start with Windows, the list's shortcut, backup and sync, updates. Changes apply right away.
+  start with Windows, the list's shortcut, how sub-folders open, web search, backup and sync, updates.
+  Changes apply right away.
 - **Keyboard**: arrows to move, Enter to launch or open a sub-folder (Ctrl+Shift+Enter = as
   administrator), **1–9** open the first nine items, Backspace or Alt+Left to go back, F2 rename,
   Alt+Enter properties, Del remove, Ctrl+F search, Esc close.
@@ -103,9 +108,9 @@ Installers (needs Inno Setup 6 or 7): `installer\build.ps1` runs the tests, publ
 `publish\full` and writes `installer\Output\pLaunch-Setup-<version>-<Light|Full>.exe`; the version comes
 from `<Version>` in `src/pLaunch/pLaunch.csproj`.
 
-`tools/MakeIcon.cs` rebuilds `src/pLaunch/Assets/pLaunch.ico` from the artwork in `tools/icon-source.jpg`
-(smooths the background, enlarges the logo, uses a thin-frame variant at 32 px and below):
-`dotnet run tools/MakeIcon.cs` (`-- --preview sheet.png` also renders a preview, `--large`/`--small` set the logo scale).
+`tools/DrawIcon.cs` draws `src/pLaunch/Assets/pLaunch.ico`: a rounded tile with a blue-violet gradient
+and two white upward chevrons, vector from 24 px up and placed on the pixel grid at 16 and 20 px:
+`dotnet run tools/DrawIcon.cs` (`-- --preview sheet.png` also renders a preview on light and dark backgrounds).
 
 ## How it works
 
@@ -113,7 +118,8 @@ Windows 11 has no taskbar toolbars and never hands a drop on a taskbar button to
 an ordinary window that stays minimized while idle. Restoring it (a click on the button, or hovering it
 during a drag) opens it as a flyout next to the taskbar, sized to its content, with the acrylic backdrop.
 When it loses the focus it minimizes again. Restore/minimize animations are turned off, so it behaves
-like a popup.
+like a popup. It is a tool window, so Alt+Tab and Win+Tab leave it out; its taskbar button is added with
+`ITaskbarList::AddTab` (again whenever Explorer restarts).
 
 - `PopupWindow` — the flyout: open/close toggle, placement, drag and drop, context menus
 - `Native/PopupPlacement` — where the popup goes (taskbar edge, auto-hide, multi-monitor, DPI)
@@ -129,3 +135,5 @@ like a popup.
 - `Services/RunningApps`, `Native/WindowInterop` — the windows of running programs (by program file or
   AppUserModelID), bringing one to the front, and pasting snippets (`SendInput` Ctrl+V)
 - `Views/PropertiesWindow`, `Views/SettingsWindow` — item properties, settings
+- `Views/FolderMenu` — a sub-folder beside the list: a non-activating window (the popup keeps the focus
+  and the keyboard), placed and filled by `PopupWindow.Menus`

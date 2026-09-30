@@ -41,6 +41,18 @@ public static partial class RunSuggestions
     /// </summary>
     public static (List<LaunchItem> First, List<LaunchItem> Last) For(string text, WebSearch web)
     {
+        var (first, last) = Typed(text);
+        if (WebSearchFor(text, web) is { } search)
+            last.Add(search);
+        return (first, last);
+    }
+
+    /// <summary>
+    /// What the text itself opens (a path, an address, a command), without the web search. It looks at
+    /// the disk and the registry: the popup calls it off the UI thread.
+    /// </summary>
+    public static (List<LaunchItem> First, List<LaunchItem> Last) Typed(string text)
+    {
         text = text.Trim();
         var first = new List<LaunchItem>();
         var last = new List<LaunchItem>();
@@ -63,14 +75,24 @@ public static partial class RunSuggestions
                 first.Add(Suggestion(ItemKind.Url, address.AbsoluteUri, null, "Go to " + text));
         }
 
-        if (SearchUrls.TryGetValue(web, out var search))
-        {
-            var item = Suggestion(ItemKind.Url, search + Uri.EscapeDataString(text), null, $"Search the web for \x201C{text}\x201D");
-            item.Id = WebSearchId;
-            last.Add(item);
-        }
         return (first, last);
     }
+
+    /// <summary>"Search the web for …" (null when off or nothing is typed); no disk access, so it shows at once.</summary>
+    public static LaunchItem? WebSearchFor(string text, WebSearch web)
+    {
+        text = text.Trim();
+        if (text.Length == 0 || !SearchUrls.TryGetValue(web, out var search))
+            return null;
+        var item = Suggestion(ItemKind.Url, search + Uri.EscapeDataString(text), null, $"Search the web for \x201C{text}\x201D");
+        item.Id = WebSearchId;
+        return item;
+    }
+
+    /// <summary>A suggestion for a network path: its icon is not looked up (each letter typed would be another server to ask).</summary>
+    public static bool IsNetworkSuggestion(LaunchItem item) =>
+        item.IsLive && item.Id.StartsWith(IdPrefix, StringComparison.Ordinal)
+        && item.Kind is ItemKind.File or ItemKind.Folder && Launcher.IsNetworkPath(item.Target);
 
     static LaunchItem Suggestion(ItemKind kind, string target, string? arguments, string name) =>
         new(IdPrefix + kind + ":" + target + (arguments is null ? "" : " " + arguments))

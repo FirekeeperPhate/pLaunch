@@ -30,6 +30,15 @@ public enum ThemeChoice
     Dark,
 }
 
+/// <summary>How a sub-folder (or a live folder) opens.</summary>
+public enum SubFolderMode
+{
+    /// <summary>In a menu beside the list, sized to its own content; its sub-folders cascade.</summary>
+    Menu,
+    /// <summary>In the popup itself, with a back button.</summary>
+    Inside,
+}
+
 /// <summary>Where "Search the web" in the search results goes; Off hides it.</summary>
 public enum WebSearch { Google, Bing, DuckDuckGo, Off }
 
@@ -60,4 +69,5 @@ public sealed class LauncherSettings
     /// </summary>
     public string Hotkey { get; set; } = "Win+Alt+Space";
     public WebSearch WebSearch { get; set; } = WebSearch.Google;
+    public SubFolderMode SubFolders { get; set; } = SubFolderMode.Menu;
 }

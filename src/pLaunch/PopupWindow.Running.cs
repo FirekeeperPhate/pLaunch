@@ -14,13 +14,19 @@ public partial class PopupWindow
     /// Marks the shown items whose program has an open window. The windows are listed off the UI thread
     /// (reading shortcuts and window properties); a newer scan makes an older one's result obsolete.
     /// </summary>
-    async void RefreshRunning()
+    void RefreshRunning()
     {
         if (!IsOpen)
             return;
         int scan = ++_runningScan;
-        var shown = _items.Where(i => RunningApps.CanSwitch(i.Model)).ToList();
-        foreach (var vm in _items.Except(shown))
+        MarkRunning(_items.ToList(), () => scan == _runningScan);
+    }
+
+    /// <summary>Marks the given rows (the popup's, or a menu's); <paramref name="current"/> = the result is still wanted.</summary>
+    async void MarkRunning(List<ItemViewModel> items, Func<bool>? current = null)
+    {
+        var shown = items.Where(i => RunningApps.CanSwitch(i.Model)).ToList();
+        foreach (var vm in items.Except(shown))
             vm.IsRunning = false;
         if (shown.Count == 0)
             return;
@@ -38,7 +44,7 @@ public partial class PopupWindow
         {
             return; // no running lines this time; nothing else depends on them
         }
-        if (scan != _runningScan)
+        if (current != null && !current())
             return;
         for (int i = 0; i < shown.Count; i++)
             shown[i].IsRunning = running[i];

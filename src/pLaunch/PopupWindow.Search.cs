@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using pLaunch.Models;
+using pLaunch.Services;
 using pLaunch.ViewModels;
 
 namespace pLaunch;
@@ -11,6 +13,38 @@ public partial class PopupWindow
     string _search = "";
 
     bool IsSearching => _search.Length > 0;
+
+    // What the search text opens by itself (a path, an address, a command), for the text it was made for
+    (string Text, List<LaunchItem> First, List<LaunchItem> Last) _suggestions = ("", [], []);
+    int _suggestionRequest;
+
+    /// <summary>
+    /// Looks up what the search text opens off the UI thread (PATH folders, the registry, a drive that
+    /// may have to spin up), then shows it if the text is still the same. The best result stays selected.
+    /// </summary>
+    async void UpdateSuggestions()
+    {
+        var text = _search;
+        int request = ++_suggestionRequest;
+        if (text.Length == 0)
+        {
+            _suggestions = ("", [], []);
+            return;
+        }
+        var (first, last) = await Task.Run(() => RunSuggestions.Typed(text));
+        if (request != _suggestionRequest || text != _search)
+            return; // typed on meanwhile
+        if (first.Count == 0 && last.Count == 0)
+        {
+            _suggestions = (text, first, last);
+            return;
+        }
+        bool bestSelected = List.SelectedIndex <= 0;
+        _suggestions = (text, first, last);
+        Refresh();
+        if (bestSelected && _items.Count > 0)
+            List.SelectedIndex = 0; // a path or an address goes first: Enter opens it
+    }
 
     /// <summary>
     /// A character typed while the list has the focus starts (or continues) a search. Digits 1-9 open the
@@ -44,7 +78,9 @@ public partial class PopupWindow
         if (text == _search)
             return;
         _search = text;
+        CloseMenus(); // opened from a result that may be gone now
         Refresh();
+        UpdateSuggestions();
         // The best result is ready for Enter
         if (IsSearching && _items.Count > 0)
             List.SelectedIndex = 0;
