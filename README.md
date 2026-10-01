@@ -23,7 +23,9 @@ shortcuts (programs, files, folders, web links, Store apps).
   text and pastes it into the window you were using (or only copies it; right click → *Copy only*).
   Drag a snippet into an editor to insert it there.
 - **Add** items by dragging them onto the list. You can also drag them onto the taskbar button and
-  hold there for a moment: the list opens and you drop into it. The *Add* button and **Ctrl+V** work too.
+  hold there for a moment: the list opens and you drop into it (also for programs and shortcuts to them,
+  for which Windows offers "Pin to taskbar" and moves the buttons aside). The *Add* button and **Ctrl+V**
+  work too.
 - **Right click** an item: open, run as administrator, open file location, rename, remove, and add a
   sub-folder or a separator right after it. Drag items to reorder them.
 - **Sub-folders** (Add → New sub-folder) open in a **menu beside the list**, as tall as their content,
@@ -129,6 +131,8 @@ like a popup. It is a tool window, so Alt+Tab and Win+Tab leave it out; its task
 - `Native/TaskbarButton`, `Native/TaskbarTab` — the taskbar button of a window left out of the switchers:
   asked for until the shell confirms it, again after Explorer restarts, removed on close; the minimized
   window kept off screen
+- `PopupWindow.DragHover`, `Native/TaskbarHitTest` — a drag held on the taskbar button opens the list,
+  whatever is dragged (the button's place is read with UI Automation when the drag starts)
 - `Services/DropReader` — file drops, browser links, Shell IDList arrays (Start menu apps)
 - `Services/IconProvider` — shell icons through `IShellItemImageFactory`
 - `Services/SingleInstance` — a second start forwards its arguments to the running instance over a named pipe

@@ -97,6 +97,7 @@ public partial class PopupWindow : Window
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         Closed += (_, _) =>
         {
+            _dragWatch?.Stop();
             CloseMenus();
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
             _hotkeys?.Dispose();
@@ -137,6 +138,7 @@ public partial class PopupWindow : Window
         Show();
         ShowActivated = true;
         _taskbarButton?.Request();
+        StartDragWatch();
         QueueIconLoad();
         ScheduleJumpList();
         if (!minimized)

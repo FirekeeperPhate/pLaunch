@@ -84,6 +84,20 @@ public sealed class MenuWindowTests
         Assert.False(TaskbarTab.ShouldPark(0, 0, 975, 400, 90, sizes));
     }
 
+    // A drag held on the taskbar: whose button is it (the names as Windows gives them)
+    [Theory]
+    [InlineData("pLaunch - 1 running window", "pLaunch", true)]
+    [InlineData("pLaunch - 1 finestra in esecuzione", "pLaunch", true)]
+    [InlineData("pLaunch", "pLaunch", true)]
+    [InlineData("pLaunch \x2013 Work - 1 running window", "pLaunch", false)]   // a named list's button
+    [InlineData("pLaunch \x2013 Work - 1 running window", "pLaunch \x2013 Work", true)]
+    [InlineData("pLaunch \x2013 Work - B - 1 running window", "pLaunch \x2013 Work", false)] // list "Work - B"
+    [InlineData("Notepad - 1 running window", "pLaunch", false)]
+    public void DragOntoTheTaskbar_FindsTheListsOwnButton(string buttonName, string title, bool own)
+    {
+        Assert.Equal(own, TaskbarHitTest.IsButtonOf(buttonName, title));
+    }
+
     // ---- the taskbar button's life (the shell faked: requests and removals are counted)
 
     const int WM_DESTROY = 0x0002;
