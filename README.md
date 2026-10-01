@@ -131,8 +131,9 @@ like a popup. It is a tool window, so Alt+Tab and Win+Tab leave it out; its task
 - `Native/TaskbarButton`, `Native/TaskbarTab` — the taskbar button of a window left out of the switchers:
   asked for until the shell confirms it, again after Explorer restarts, removed on close; the minimized
   window kept off screen
-- `PopupWindow.DragHover`, `Native/TaskbarHitTest` — a drag held on the taskbar button opens the list,
-  whatever is dragged (the button's place is read with UI Automation when the drag starts)
+- `PopupWindow.DragHover`, `Native/DragHoverDetector`, `Native/TaskbarHitTest` — a drag held on the
+  taskbar button opens the list, whatever is dragged (the button's place is read with UI Automation when
+  the drag starts)
 - `Services/DropReader` — file drops, browser links, Shell IDList arrays (Start menu apps)
 - `Services/IconProvider` — shell icons through `IShellItemImageFactory`
 - `Services/SingleInstance` — a second start forwards its arguments to the running instance over a named pipe

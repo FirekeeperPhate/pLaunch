@@ -61,27 +61,20 @@ public class AppearanceTests
 
     // Pixels as the shell hands them: B, G, R, A
     [Fact]
-    public void ShellIcons_WithStraightAlpha_AreNotReadAsPremultiplied()
+    public void ShellIcons_KeepTheirAlpha()
     {
-        // An icon's soft shadow: white at 25 % opacity. Premultiplied, it would show as a light grey patch.
-        byte[] icon = [255, 255, 255, 64, 0, 0, 200, 255, 0, 0, 0, 0];
-        Assert.Equal(PixelFormats.Bgra32, IconProvider.AlphaFormat(icon));
-        Assert.Equal(64, icon[3]); // the alpha is kept
-    }
-
-    [Fact]
-    public void ShellThumbnails_Premultiplied_StayPremultiplied()
-    {
-        byte[] thumbnail = [64, 64, 64, 64, 0, 0, 200, 255, 0, 0, 0, 0];
-        Assert.Equal(PixelFormats.Pbgra32, IconProvider.AlphaFormat(thumbnail));
+        // A soft shadow (white at 25 %), a dark translucent pixel, an opaque and a transparent one
+        byte[] icon = [255, 255, 255, 64, 40, 40, 40, 128, 0, 0, 200, 255, 0, 0, 0, 0];
+        var before = (byte[])icon.Clone();
+        IconProvider.OpaqueWithoutAlpha(icon);
+        Assert.Equal(before, icon);
     }
 
     [Fact]
     public void OldIcons_WithoutAlpha_BecomeOpaque()
     {
         byte[] old = [10, 20, 30, 0, 0, 0, 0, 0];
-        Assert.Equal(PixelFormats.Bgra32, IconProvider.AlphaFormat(old));
-        Assert.Equal(255, old[3]);
-        Assert.Equal(255, old[7]);
+        IconProvider.OpaqueWithoutAlpha(old);
+        Assert.Equal([10, 20, 30, 255, 0, 0, 0, 255], old);
     }
 }

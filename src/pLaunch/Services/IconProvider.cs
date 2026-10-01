@@ -176,32 +176,24 @@ public static class IconProvider
             NativeMethods.ReleaseDC(IntPtr.Zero, hdc);
         }
 
-        var bitmap = BitmapSource.Create(w, h, 96, 96, AlphaFormat(pixels), null, pixels, w * 4);
+        OpaqueWithoutAlpha(pixels);
+        // The shell hands out straight alpha (the color as it is, however transparent the pixel), for icons
+        // and for the thumbnails of images alike. Read as premultiplied, soft edges and shadows show as a
+        // light, half opaque background.
+        var bitmap = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, pixels, w * 4);
         bitmap.Freeze();
         return bitmap;
     }
 
-    /// <summary>
-    /// How the alpha of 32-bit BGRA pixels from the shell is to be read. Icons come back with straight
-    /// alpha (the color as it is, however transparent the pixel), thumbnails premultiplied: read the wrong
-    /// way, the soft edges and shadows of icons show as a light, half opaque background. Only straight
-    /// alpha can have a color channel above the alpha. No alpha at all (old icons): made opaque.
-    /// </summary>
-    internal static PixelFormat AlphaFormat(byte[] pixels)
+    /// <summary>Old icons have no alpha at all (every pixel would be transparent): they are made opaque.</summary>
+    internal static void OpaqueWithoutAlpha(byte[] pixels)
     {
-        bool anyAlpha = false, straight = false;
-        for (int i = 0; i < pixels.Length; i += 4)
+        for (int i = 3; i < pixels.Length; i += 4)
         {
-            byte alpha = pixels[i + 3];
-            anyAlpha |= alpha != 0;
-            straight |= pixels[i] > alpha || pixels[i + 1] > alpha || pixels[i + 2] > alpha;
+            if (pixels[i] != 0)
+                return;
         }
-        if (!anyAlpha)
-        {
-            for (int i = 3; i < pixels.Length; i += 4)
-                pixels[i] = 255;
-            return PixelFormats.Bgra32;
-        }
-        return straight ? PixelFormats.Bgra32 : PixelFormats.Pbgra32;
+        for (int i = 3; i < pixels.Length; i += 4)
+            pixels[i] = 255;
     }
 }

@@ -781,10 +781,10 @@ public partial class PopupWindow : Window
             return;
         Cloak(true);
         var (started, errors) = Launcher.LaunchAll(items);
+        CountLaunches(items.Where(i => i.LastLaunched != null), alreadyRecorded: true);
         if (errors.Count == 0 && started > 0)
             HidePopup();
         Cloak(false);
-        CountLaunches(items.Where(i => i.LastLaunched != null), alreadyRecorded: true);
         if (errors.Count > 0)
             ShowError(started > 0 ? $"{started} opened, {errors.Count} could not be opened:" : "Nothing could be opened:",
                 string.Join("\n", errors.Take(10)));
@@ -826,13 +826,12 @@ public partial class PopupWindow : Window
             // Launch first: while pLaunch is still the foreground app the new window may take the focus
             if (Launcher.Launch(item.Model, asAdmin, newWindow))
             {
+                CountLaunches([item.Model]); // saved before the popup goes: an error is shown with it
                 HidePopup();
-                CountLaunches([item.Model]);
             }
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
-            Cloak(false);
             ShowError($"Cannot open \"{item.Name}\".", ex.Message);
         }
         finally
@@ -1812,8 +1811,11 @@ public partial class PopupWindow : Window
         finally { _suppressHide--; }
     }
 
-    void ShowError(string message, string detail) =>
+    void ShowError(string message, string detail)
+    {
+        Cloak(false); // an error while launching: the popup it belongs to is shown again
         ShowModal(() => MessageBox.Show(this, $"{message}\n\n{detail}", "pLaunch", MessageBoxButton.OK, MessageBoxImage.Warning));
+    }
 
     internal bool SafeAutostart()
     {

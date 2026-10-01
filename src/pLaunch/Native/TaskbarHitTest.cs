@@ -40,9 +40,10 @@ internal static class TaskbarHitTest
                         found.Add(button.Current.BoundingRectangle);
                 }
             }
-            catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException or ArgumentException)
+            catch (Exception)
             {
-                // That taskbar went away meanwhile
+                // That taskbar went away meanwhile, or Explorer is busy or restarting: UI Automation fails in
+                // many ways (timeouts included), and none of them may take pLaunch down. No button there.
             }
         }
         return found;

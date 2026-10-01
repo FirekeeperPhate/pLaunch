@@ -98,6 +98,65 @@ public sealed class MenuWindowTests
         Assert.Equal(own, TaskbarHitTest.IsButtonOf(buttonName, title));
     }
 
+    // What the watching timer sees, tick after tick: button, pointer, on the taskbar or not
+    static NativeMethods.POINT At(int x, int y) => new() { X = x, Y = y };
+    static readonly NativeMethods.POINT Desktop = At(500, 300), Button = At(1150, 1040);
+
+    static List<DragHoverDetector.Step> Steps(DragHoverDetector detector, params (bool Down, NativeMethods.POINT At, bool OnTaskbar)[] ticks) =>
+        ticks.Select(t => detector.Tick(t.Down, t.At, t.OnTaskbar, popupOpen: false)).ToList();
+
+    [Fact]
+    public void DragHeldOnTheTaskbar_ReadsTheButtonsWhenItStarts_ThenLooksOnce()
+    {
+        var steps = Steps(new DragHoverDetector(),
+            (true, Desktop, false),         // pressed on a file
+            (true, At(540, 380), false),    // moving: a drag
+            (true, At(900, 800), false),
+            (true, Button, true),           // on the taskbar
+            (true, Button, true), (true, Button, true), (true, Button, true), // resting
+            (true, Button, true), (true, Button, true));                      // still there: not looked at again
+        Assert.Equal(DragHoverDetector.Step.ReadButtons, steps[1]);
+        Assert.Equal(DragHoverDetector.Step.Probe, steps[3 + DragHoverDetector.RestTicks]);
+        Assert.Single(steps, s => s == DragHoverDetector.Step.ReadButtons);
+        Assert.Single(steps, s => s == DragHoverDetector.Step.Probe);
+    }
+
+    [Fact]
+    public void ClicksAndHoldsAreNotDrags()
+    {
+        // A click that does not move, anywhere: Explorer is never asked anything
+        Assert.All(Steps(new DragHoverDetector(), (true, Desktop, false), (true, Desktop, false), (true, At(503, 302), false), (false, Desktop, false)),
+            s => Assert.Equal(DragHoverDetector.Step.None, s));
+        // A press on the taskbar itself, held on the button (or dragging a button around)
+        Assert.All(Steps(new DragHoverDetector(), (true, Button, true), (true, Button, true), (true, Button, true), (true, Button, true), (true, At(1300, 1040), true), (true, Button, true)),
+            s => Assert.Equal(DragHoverDetector.Step.None, s));
+    }
+
+    [Fact]
+    public void DragMovingAlongTheTaskbar_IsLookedAtWhereItRests_AndAgainAfterTheNextPress()
+    {
+        var detector = new DragHoverDetector();
+        var steps = Steps(detector,
+            (true, Desktop, false), (true, At(700, 700), false),
+            (true, At(900, 1040), true), (true, At(1000, 1040), true), (true, At(1100, 1040), true), // passing over
+            (true, Button, true), (true, Button, true), (true, Button, true), (true, Button, true));
+        Assert.Equal(DragHoverDetector.Step.Probe, steps[^1]);
+        Assert.Single(steps, s => s == DragHoverDetector.Step.Probe);
+
+        Assert.Equal(DragHoverDetector.Step.None, detector.Tick(false, Button, true, false)); // dropped
+        steps = Steps(detector, (true, Desktop, false), (true, At(700, 700), false));
+        Assert.Equal(DragHoverDetector.Step.ReadButtons, steps[1]); // a new drag starts over
+    }
+
+    [Fact]
+    public void NothingIsLookedAt_WhileTheListIsOpen()
+    {
+        var detector = new DragHoverDetector();
+        detector.Tick(true, Desktop, false, popupOpen: true);
+        for (int i = 0; i < 6; i++)
+            Assert.Equal(DragHoverDetector.Step.None, detector.Tick(true, Button, true, popupOpen: true));
+    }
+
     // ---- the taskbar button's life (the shell faked: requests and removals are counted)
 
     const int WM_DESTROY = 0x0002;
