@@ -9,6 +9,7 @@ internal static class NativeMethods
 
     public const int WM_SYSCOMMAND = 0x0112;
     public const int SC_MAXIMIZE = 0xF030;
+    public const int SC_RESTORE = 0xF120;
     public const uint SWP_NOZORDER = 0x0004;
     public const uint SWP_NOACTIVATE = 0x0010;
     public const int ASFW_ANY = -1;

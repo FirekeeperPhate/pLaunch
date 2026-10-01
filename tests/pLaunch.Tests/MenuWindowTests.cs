@@ -157,6 +157,48 @@ public sealed class MenuWindowTests
             Assert.Equal(DragHoverDetector.Step.None, detector.Tick(true, Button, true, popupOpen: true));
     }
 
+    // ---- a click on the taskbar button of the open popup: the press hides it, the release must not reopen it
+
+    static readonly DateTime T0 = new(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public void RestoreRightAfterThePopupHid_IsTheClosingClick_OnlyOnce()
+    {
+        var click = new ClosingClick();
+        click.PopupHidden(T0, pressedOnTaskbar: true);
+        Assert.True(click.Take(T0.AddMilliseconds(80)));
+        Assert.False(click.Take(T0.AddMilliseconds(90))); // the next restore is a real one
+    }
+
+    [Fact]
+    public void SlowClick_StillCloses_WhileThePressIsHeldOrJustReleased()
+    {
+        var click = new ClosingClick();
+        click.PopupHidden(T0, pressedOnTaskbar: true);
+        for (int i = 0; i < 10; i++)
+            click.Tick(buttonDown: true); // held for 1.5 s
+        click.Tick(buttonDown: false);    // released: the restore comes right away
+        Assert.True(click.Take(T0.AddMilliseconds(1600)));
+    }
+
+    [Fact]
+    public void PressReleasedAWhileAgo_OrFocusLostElsewhere_DoesNotHoldBackAnOpening()
+    {
+        var click = new ClosingClick();
+        click.PopupHidden(T0, pressedOnTaskbar: true);
+        click.Tick(true);
+        for (int i = 0; i < ClosingClick.ReleaseTicks; i++)
+            click.Tick(false); // released somewhere else, no restore came
+        Assert.False(click.Take(T0.AddSeconds(2)));
+
+        click.PopupHidden(T0, pressedOnTaskbar: false); // a click in another window closed the popup
+        Assert.False(click.Take(T0.AddSeconds(1)));     // a later click on the button opens it
+
+        click.PopupHidden(T0, pressedOnTaskbar: true);
+        click.Forget();                                  // opened on purpose (shortcut)
+        Assert.False(click.Take(T0.AddMilliseconds(50)));
+    }
+
     // ---- the taskbar button's life (the shell faked: requests and removals are counted)
 
     const int WM_DESTROY = 0x0002;

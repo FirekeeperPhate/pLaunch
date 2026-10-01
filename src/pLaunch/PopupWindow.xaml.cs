@@ -26,7 +26,7 @@ public partial class PopupWindow : Window
 {
     const double GapDip = 12; // distance from the taskbar, like the Start menu
     const string InternalDragFormat = "pLaunch.ItemId";
-    static readonly TimeSpan ReopenGuard = TimeSpan.FromMilliseconds(400);
+    readonly ClosingClick _closingClick = new();
     /// <summary>Holding a drag over a sub-folder opens it; over the back button, goes up.</summary>
     static readonly TimeSpan SpringDelay = TimeSpan.FromMilliseconds(800);
 
@@ -48,7 +48,6 @@ public partial class PopupWindow : Window
     ViewMetrics _metrics = ViewMetrics.For(ViewMode.List, ItemSize.Medium);
     IntPtr _hwnd;
     int _suppressHide;
-    DateTime _lastAutoHide;
     NativeMethods.POINT _anchor;
     int _outsideTicks;
     Point _pressPoint;
@@ -147,7 +146,7 @@ public partial class PopupWindow : Window
 
     public void ShowPopup()
     {
-        _lastAutoHide = default;
+        _closingClick.Forget();
         if (WindowState == WindowState.Minimized)
             WindowState = WindowState.Normal; // OnStateChanged places and activates it
         else
@@ -159,7 +158,8 @@ public partial class PopupWindow : Window
         if (WindowState == WindowState.Minimized)
             return;
         if (auto)
-            _lastAutoHide = DateTime.UtcNow;
+            _closingClick.PopupHidden(DateTime.UtcNow,
+                pressedOnTaskbar: IsLeftButtonDown() && NativeMethods.GetCursorPos(out var at) && TaskbarHitTest.IsTaskbarAt(at));
         WindowState = WindowState.Minimized;
     }
 
@@ -171,11 +171,10 @@ public partial class PopupWindow : Window
                 WindowState = WindowState.Normal;
                 break;
             case WindowState.Normal:
-                // Clicking the taskbar button of the open popup may deactivate it first (so it hides),
-                // then the click restores it: treat that as the "close" half of the toggle
-                if (DateTime.UtcNow - _lastAutoHide < ReopenGuard)
+                // The restore of a closing click that got through all the same (not asked with SC_RESTORE,
+                // which the window procedure holds back): closed again at once
+                if (_closingClick.Take(DateTime.UtcNow))
                 {
-                    _lastAutoHide = default;
                     Dispatcher.BeginInvoke(() => WindowState = WindowState.Minimized);
                     return;
                 }
@@ -381,10 +380,34 @@ public partial class PopupWindow : Window
             handled = true;
             return IntPtr.Zero;
         }
-        if (msg == NativeMethods.WM_SYSCOMMAND && ((int)wParam & 0xFFF0) == NativeMethods.SC_MAXIMIZE)
+        int command = msg == NativeMethods.WM_SYSCOMMAND ? (int)wParam & 0xFFF0 : 0;
+        if (command == NativeMethods.SC_MAXIMIZE)
+        {
             handled = true;
+        }
+        else if (command == NativeMethods.SC_RESTORE && _closingClick.Take(DateTime.UtcNow))
+        {
+            // The second half of a click on the taskbar button of the open popup (see ClosingClick): the
+            // popup stays closed, without showing up again for a moment first.
+            handled = true;
+            Dispatcher.BeginInvoke(PassFocusOn, DispatcherPriority.Background);
+        }
         _taskbarButton?.HandleMessage(msg, lParam);
         return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// With the restore held back, the taskbar has still made the minimized popup the active window: the
+    /// keys would go to a window nobody sees. The focus goes to the window in front, as it does when a
+    /// window is minimized.
+    /// </summary>
+    void PassFocusOn()
+    {
+        if (WindowState != WindowState.Minimized || WindowInterop.GetForegroundWindow() != _hwnd)
+            return;
+        var next = WindowInterop.AppWindows().Select(w => w.Handle).FirstOrDefault(h => !WindowInterop.IsIconic(h));
+        if (next != IntPtr.Zero)
+            WindowInterop.SetForegroundWindow(next);
     }
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)

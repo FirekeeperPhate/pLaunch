@@ -28,6 +28,7 @@ public partial class PopupWindow
     async void DragWatchTick()
     {
         bool down = IsLeftButtonDown();
+        _closingClick.Tick(down); // the press that closed the popup: still held, or over
         NativeMethods.POINT point = default;
         bool onTaskbar = down && NativeMethods.GetCursorPos(out point) && TaskbarHitTest.IsTaskbarAt(point);
         var title = Title;

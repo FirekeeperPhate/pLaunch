@@ -108,6 +108,9 @@ dotnet test pLaunch.slnx
 
 `tests/ui/MenuClicks.cs` checks the side menus with the real mouse and keyboard (it moves and clicks the
 pointer for a few seconds, only over its own windows): `dotnet run tests/ui/MenuClicks.cs -- <output folder>`.
+`tests/ui/TaskbarButton.cs` clicks the taskbar button of a pLaunch it starts (open, close without the list
+showing up again, focus back to the window in front, slow clicks):
+`dotnet run tests/ui/TaskbarButton.cs -- <pLaunch.exe> <output folder>`.
 
 Installers (needs Inno Setup 6 or 7): `installer\build.ps1` runs the tests, publishes `publish\light` and
 `publish\full` and writes `installer\Output\pLaunch-Setup-<version>-<Light|Full>.exe`; the version comes
