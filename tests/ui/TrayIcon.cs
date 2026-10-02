@@ -121,8 +121,18 @@ if (hwnd == IntPtr.Zero || !registered)
 (int X, int Y) Icon()
 {
     if (FindIcon() is { } visible) return visible;
-    Click((rect.L + rect.R) / 2, (rect.T + rect.B) / 2); // the arrow: shows the hidden icons
-    return FindIcon() ?? (-1, -1);
+    // Among the hidden icons: the arrow shows them. The flyout does not always open at the first click
+    // (e.g. right after another window had the mouse), and takes a moment to be there: tried again.
+    for (int attempt = 0; attempt < 3; attempt++)
+    {
+        Click((rect.L + rect.R) / 2, (rect.T + rect.B) / 2);
+        for (int wait = 0; wait < 5; wait++)
+        {
+            if (FindIcon() is { } found) return found;
+            Thread.Sleep(300);
+        }
+    }
+    return (-1, -1);
 }
 
 var icon = Icon();

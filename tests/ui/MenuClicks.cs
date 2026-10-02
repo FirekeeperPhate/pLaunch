@@ -304,9 +304,20 @@ static int Run(string outDir)
             Wait(2500);
             Check("real: a middle click launches the item", File.Exists(marker));
             Check("real: and the list stays open", w.WindowState == WindowState.Normal && w.IsVisible);
+            // The command showed no window: the list is still the active one, and stays while it is (the
+            // pointer may be aside while typing the next search)
             MoveTo(new Point(at.X - 900, at.Y - 500));
             Wait(1800);
-            Check("real: until the pointer leaves it", w.WindowState == WindowState.Minimized);
+            Check("real: also with the pointer away, while it is the active window", w.WindowState == WindowState.Normal, $"(active {w.IsActive})");
+            // Another window takes the focus (as a launched program does): now the pointer being away closes it
+            var elsewhere = new Window { Title = "elsewhere", Width = 240, Height = 120, Left = 40, Top = 40, Topmost = true };
+            elsewhere.Show();
+            elsewhere.Activate();
+            Wait(600);
+            Wait(1800);
+            Check("real: and closes once the pointer is away and the focus elsewhere", w.WindowState == WindowState.Minimized, $"(active {w.IsActive})");
+            elsewhere.Close();
+            Wait(300);
         }
 
         // 9. A search result says which sub-folder it is in; after the search no row does (the rows are

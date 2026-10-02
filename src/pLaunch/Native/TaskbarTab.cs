@@ -77,7 +77,7 @@ internal static class TaskbarTab
         }
     }
 
-    static uint MonitorDpi(int x, int y)
+    internal static uint MonitorDpi(int x, int y)
     {
         var monitor = NativeMethods.MonitorFromPoint(new NativeMethods.POINT { X = x, Y = y }, NativeMethods.MONITOR_DEFAULTTONEAREST);
         return NativeMethods.GetDpiForMonitor(monitor, 0, out var dpi, out _) == 0 ? dpi : 0;

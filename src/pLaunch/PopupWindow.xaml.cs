@@ -159,8 +159,7 @@ public partial class PopupWindow : Window
         if (WindowState == WindowState.Minimized)
             return;
         if (auto)
-            _closingClick.PopupHidden(DateTime.UtcNow,
-                pressedOnTaskbar: IsLeftButtonDown() && NativeMethods.GetCursorPos(out var at) && TaskbarHitTest.IsTaskbarAt(at));
+            _closingClick.PopupHidden(DateTime.UtcNow, PressedOnTaskbar());
         WindowState = WindowState.Minimized;
     }
 
@@ -192,7 +191,8 @@ public partial class PopupWindow : Window
                 // Back to the top level (and no search) while hidden: the next opening starts there, like a
                 // menu, and items forwarded meanwhile ("Send to", command line) do not land in a sub-folder
                 // nobody sees
-                bool reset = _path.Count > 0 || IsSearching;
+                bool reset = _path.Count > 0 || IsSearching || _resortPending;
+                _resortPending = false;
                 _path.Clear();
                 ClearSearchText();
                 if (reset)
@@ -226,9 +226,18 @@ public partial class PopupWindow : Window
         }
     }
 
+    /// <summary>The left button is held on a taskbar: on pLaunch's button, its notification area icon, or anything else there.</summary>
+    static bool PressedOnTaskbar() =>
+        IsLeftButtonDown() && NativeMethods.GetCursorPos(out var at) && TaskbarHitTest.IsTaskbarAt(at);
+
     void OnDeactivated(object? sender, EventArgs e)
     {
-        if (_suppressHide > 0 || _stayOpen || WindowState != WindowState.Normal)
+        if (_suppressHide > 0 || WindowState != WindowState.Normal)
+            return;
+        // Kept open after a middle click: the focus going to what was launched does not close the list. A
+        // press on the taskbar does: on pLaunch's button or icon it is the click that closes the list, on
+        // anything else there the user has moved on.
+        if (_stayOpen && !PressedOnTaskbar())
             return;
         Dispatcher.BeginInvoke(() =>
         {
@@ -249,8 +258,9 @@ public partial class PopupWindow : Window
             _hoverWatch.Stop();
             return;
         }
-        // Inside: on the popup or a menu, in one of its dialogs, or in a context menu (it holds the mouse)
-        if (IsLeftButtonDown() || IsCursorOverWindow() || _suppressHide > 0 || Mouse.Captured != null)
+        // Still in use: the list kept open is the active window (typing a search with the pointer aside), or
+        // the pointer is on the popup or a menu, in one of its dialogs, or in a context menu (it holds the mouse)
+        if (IsActive || IsLeftButtonDown() || IsCursorOverWindow() || _suppressHide > 0 || Mouse.Captured != null)
         {
             _outsideTicks = 0;
             return;
@@ -796,7 +806,7 @@ public partial class PopupWindow : Window
     }
 
     /// <summary>A launch counts for the "most used" order (saved items only: live folder entries are not kept).</summary>
-    void CountLaunches(IEnumerable<LaunchItem> launched, bool alreadyRecorded = false)
+    void CountLaunches(IEnumerable<LaunchItem> launched, bool alreadyRecorded = false, bool resort = true)
     {
         bool any = false;
         foreach (var item in launched.Where(i => !i.IsLive))
@@ -808,7 +818,10 @@ public partial class PopupWindow : Window
         if (!any)
             return;
         Save();
-        if (_settings.Sort == SortMode.MostUsed)
+        // Not under a pointer that goes on launching (the list kept open): sorted again when it closes
+        if (_settings.Sort == SortMode.MostUsed && !resort)
+            _resortPending = true;
+        else if (_settings.Sort == SortMode.MostUsed)
             Refresh();
     }
 
@@ -883,7 +896,7 @@ public partial class PopupWindow : Window
             // A snippet is only copied when the list stays: there is no window to paste it into yet.
             if (Launcher.Launch(item.Model, asAdmin, newWindow, paste: !keepOpen))
             {
-                CountLaunches([item.Model]); // saved before the popup goes: an error is shown with it
+                CountLaunches([item.Model], resort: !keepOpen); // saved before the popup goes: an error is shown with it
                 if (keepOpen)
                     StayOpen();
                 else
@@ -901,10 +914,13 @@ public partial class PopupWindow : Window
     }
 
     bool _stayOpen; // after a middle click: losing the focus to what was launched does not close the list
+    bool _resortPending; // launches counted while the list was kept open: "most used" is sorted again once it closes
 
     /// <summary>
-    /// The list stays open, above the window that just opened, for launching something else. It closes
-    /// when the pointer has left it for a moment (or with Esc, or a click on the taskbar button).
+    /// The list stays open, above the window that just opened, for launching something else. While it is
+    /// the active window it stays like any open list (Esc or a normal launch close it). Once the focus is
+    /// elsewhere, it closes when the pointer has left it for a moment (HoverWatch_Tick), or at a press on
+    /// the taskbar (OnDeactivated).
     /// </summary>
     void StayOpen()
     {

@@ -216,7 +216,8 @@ public partial class PopupWindow
     /// <summary>The icon's menu, at the icon (the place of the right click, or the icon's for the menu key).</summary>
     void ShowTrayMenu(NativeMethods.POINT at)
     {
-        double scale = VisualTreeHelperDpi();
+        // The scaling where the icon is (the popup may last have been on a monitor with another one)
+        double scale = TaskbarTab.MonitorDpi(at.X, at.Y) is > 0 and var dpi ? dpi / 96.0 : VisualTreeHelperDpi();
         LaunchItem? chosen = null;
         var menu = new ContextMenu { Placement = PlacementMode.AbsolutePoint, HorizontalOffset = at.X / scale, VerticalOffset = at.Y / scale };
         // The most used shortcuts, to launch without opening the list (the taskbar button has its jump list)
