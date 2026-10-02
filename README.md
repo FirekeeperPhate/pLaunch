@@ -183,3 +183,7 @@ like a popup. It is a tool window, so Alt+Tab and Win+Tab leave it out; its task
 - `Views/PropertiesWindow`, `Views/SettingsWindow` — item properties, settings
 - `Views/FolderMenu` — a sub-folder beside the list: a non-activating window (the popup keeps the focus
   and the keyboard), placed and filled by `PopupWindow.Menus`
+
+## License
+
+pLaunch is released under the [MIT License](LICENSE).
