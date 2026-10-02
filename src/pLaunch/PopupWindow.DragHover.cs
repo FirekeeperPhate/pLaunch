@@ -41,8 +41,7 @@ public partial class PopupWindow
                 _probing = true;
                 try
                 {
-                    bool onButton = IsOnTrayIcon(point)
-                        || _buttonsAtDragStart is { } before && TaskbarHitTest.Contains(await before, point)
+                    bool onButton = _buttonsAtDragStart is { } before && TaskbarHitTest.Contains(await before, point)
                         || TaskbarHitTest.Contains(await Task.Run(() => TaskbarHitTest.ButtonsOf(title)), point);
                     if (onButton && IsLeftButtonDown() && !IsOpen && IsLoaded)
                         ShowPopup(); // closes again by itself when the drop happens elsewhere (see OnPopupOpened)

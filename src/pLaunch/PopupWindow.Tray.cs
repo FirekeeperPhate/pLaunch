@@ -14,6 +14,9 @@ public partial class PopupWindow
     IntPtr _extractedTrayIcon;      // an icon handle of our own, to be destroyed
     NativeMethods.POINT? _openAt;   // the next opening is anchored here, not at the pointer
     int _trayRetries;
+    DispatcherTimer? _trayRetry;
+    DateTime _lastKeyToggle;
+    Version? _notifiedUpdate;       // told once with a notification
 
     bool WantsTaskbarButton => _settings.IconPlace != IconPlace.Tray;
     bool WantsTrayIcon => _settings.IconPlace != IconPlace.Taskbar;
@@ -50,20 +53,35 @@ public partial class PopupWindow
         if (_hwnd == IntPtr.Zero || !WantsTrayIcon)
             return;
         _tray ??= new TrayIcon(_hwnd);
-        if (_tray.Show(TrayIconHandle(), Title))
+        if (_trayRetry == null)
         {
-            _trayRetries = 0;
+            _trayRetry = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            _trayRetry.Tick += (_, _) => ShowTrayIcon();
         }
-        else if (++_trayRetries <= 10)
+        _trayRetry.Stop(); // one retry pending at most, whoever asks
+        if (_tray.Show(TrayIconHandle(), TrayTip()))
+            _trayRetries = 0;
+        else if (IsLoaded && ++_trayRetries <= 10)
+            _trayRetry.Start();
+    }
+
+    /// <summary>The icon's tooltip: the list's name, and that an update is waiting.</summary>
+    string TrayTip() => _update is { } update ? $"{Title} - version {update.Version} is available" : Title;
+
+    /// <summary>
+    /// A new version was found. On the taskbar button a badge says so; with the icon in the notification
+    /// area only, the icon says it: in its tooltip, and once with a notification (a click on it opens the
+    /// list, where the update is offered).
+    /// </summary>
+    void TellUpdateInTray()
+    {
+        if (_tray is not { IsShown: true })
+            return;
+        ShowTrayIcon(); // the tooltip
+        if (_update is { } update && !WantsTaskbarButton && _notifiedUpdate != update.Version)
         {
-            var retry = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-            retry.Tick += (_, _) =>
-            {
-                retry.Stop();
-                if (IsLoaded && _tray is { IsShown: false })
-                    ShowTrayIcon();
-            };
-            retry.Start();
+            _notifiedUpdate = update.Version;
+            _tray.Notify(Title, $"Version {update.Version} is available. Open the list to install it.");
         }
     }
 
@@ -131,10 +149,40 @@ public partial class PopupWindow
     void OnTrayMessage(IntPtr wParam, IntPtr lParam)
     {
         var (action, at) = TrayIcon.Decode(wParam, lParam);
-        if (action == TrayIcon.Action.Toggle)
-            Dispatcher.BeginInvoke(() => ToggleFromTray(at));
-        else if (action == TrayIcon.Action.Menu)
-            Dispatcher.BeginInvoke(ShowTrayMenu);
+        if (action != TrayIcon.Action.None)
+            Dispatcher.BeginInvoke(() => OnTrayAction(action, at));
+    }
+
+    void OnTrayAction(TrayIcon.Action action, NativeMethods.POINT at)
+    {
+        // One of pLaunch's own dialogs is open (Settings, Properties, a question): that is what the icon
+        // brings to the front. The list under it neither closes nor gets another dialog.
+        if (_suppressHide > 0)
+        {
+            var dialog = WindowInterop.EnabledPopup(_hwnd);
+            WindowInterop.SetForegroundWindow(dialog != IntPtr.Zero ? dialog : _hwnd);
+            return;
+        }
+        switch (action)
+        {
+            case TrayIcon.Action.Toggle:
+                ToggleFromTray(at);
+                break;
+            case TrayIcon.Action.ToggleByKey:
+                // Enter comes twice (Space once): the second one must not close what the first one opened
+                var now = DateTime.UtcNow;
+                if (now - _lastKeyToggle > TimeSpan.FromMilliseconds(500))
+                    ToggleFromTray(at);
+                _lastKeyToggle = now;
+                break;
+            case TrayIcon.Action.Menu:
+                ShowTrayMenu(at);
+                break;
+            case TrayIcon.Action.Open:
+                if (!IsOpen)
+                    OpenFromTray(at);
+                break;
+        }
     }
 
     /// <summary>
@@ -146,10 +194,13 @@ public partial class PopupWindow
         if (_closingClick.Take(DateTime.UtcNow))
             return;
         if (IsOpen)
-        {
             HidePopup();
-            return;
-        }
+        else
+            OpenFromTray(at);
+    }
+
+    void OpenFromTray(NativeMethods.POINT at)
+    {
         // Beside the icon. One hidden in the overflow is above the taskbar: the list still goes against the
         // taskbar, at the icon's place along it.
         _openAt = TaskbarRect() is { } bar && bar.Width >= bar.Height
@@ -158,11 +209,13 @@ public partial class PopupWindow
         ShowPopup();
     }
 
-    void ShowTrayMenu()
+    /// <summary>The icon's menu, at the icon (the place of the right click, or the icon's for the menu key).</summary>
+    void ShowTrayMenu(NativeMethods.POINT at)
     {
-        var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
-        menu.Items.Add(CreateMenuItem("Open", ShowPopup, "\xE8A7"));
-        menu.Items.Add(CreateMenuItem("Settings\x2026", () => { ShowPopup(); OpenSettings(); }, "\xE713"));
+        double scale = VisualTreeHelperDpi();
+        var menu = new ContextMenu { Placement = PlacementMode.AbsolutePoint, HorizontalOffset = at.X / scale, VerticalOffset = at.Y / scale };
+        menu.Items.Add(CreateMenuItem("Open", () => OpenFromTray(at), "\xE8A7"));
+        menu.Items.Add(CreateMenuItem("Settings\x2026", () => { OpenFromTray(at); OpenSettings(); }, "\xE713"));
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem("Exit", Close, "\xE711"));
         // A menu of a window that is not in front would stay open when clicking elsewhere
@@ -173,6 +226,7 @@ public partial class PopupWindow
 
     void RemoveTrayIcon()
     {
+        _trayRetry?.Stop();
         _tray?.Remove();
         DestroySymbolIcon();
         if (_extractedTrayIcon != IntPtr.Zero)
@@ -181,8 +235,4 @@ public partial class PopupWindow
             _extractedTrayIcon = IntPtr.Zero;
         }
     }
-
-    bool IsOnTrayIcon(NativeMethods.POINT point) =>
-        _tray != null && _tray.TryGetRect(out var r)
-        && point.X >= r.Left && point.X < r.Right && point.Y >= r.Top && point.Y < r.Bottom;
 }

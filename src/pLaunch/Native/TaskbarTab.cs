@@ -169,6 +169,7 @@ internal static class TaskbarTab
     {
         ChangeWindowMessageFilterEx(hwnd, (uint)TaskbarButtonCreatedMessage, MSGFLT_ALLOW, IntPtr.Zero);
         ChangeWindowMessageFilterEx(hwnd, (uint)TaskbarCreatedMessage, MSGFLT_ALLOW, IntPtr.Zero);
+        ChangeWindowMessageFilterEx(hwnd, (uint)TrayIcon.CallbackMessage, MSGFLT_ALLOW, IntPtr.Zero); // clicks on the notification area icon
     }
 
     [DllImport("user32.dll")]

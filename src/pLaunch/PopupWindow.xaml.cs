@@ -476,12 +476,7 @@ public partial class PopupWindow : Window
             // only the web search is there
             var (first, last) = _suggestions.Text == _search ? (_suggestions.First, _suggestions.Last) : ([], []);
             target = first.Select(ViewModelFor).ToList();
-            foreach (var (item, location) in ItemSearch.Find(_root, _search))
-            {
-                var vm = ViewModelFor(item);
-                vm.Location = location;
-                target.Add(vm);
-            }
+            target.AddRange(ItemSearch.Find(_root, _search).Select(found => ViewModelFor(found.Item)));
             target.AddRange(last.Select(ViewModelFor));
             if (RunSuggestions.WebSearchFor(_search, _settings.WebSearch) is { } webSearch)
                 target.Add(ViewModelFor(webSearch));
@@ -491,8 +486,6 @@ public partial class PopupWindow : Window
             // Live folders come sorted from the disk (folders first); saved levels follow the chosen order
             var level = CurrentLevel;
             target = (InLiveFolder ? level : ItemTree.DisplayOrder(level, _settings.Sort)).Select(ViewModelFor).ToList();
-            foreach (var vm in target)
-                vm.Location = null;
         }
         foreach (var vm in target)
         {
@@ -790,8 +783,6 @@ public partial class PopupWindow : Window
         {
             if (!alreadyRecorded)
                 Launcher.RecordLaunch(item);
-            if (_viewModels.TryGetValue(item.Id, out var vm))
-                vm.RefreshToolTip();
             any = true;
         }
         if (!any)

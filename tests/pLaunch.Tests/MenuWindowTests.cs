@@ -199,11 +199,25 @@ public sealed class MenuWindowTests
         Assert.False(click.Take(T0.AddMilliseconds(50)));
     }
 
+    // A drag resting on the taskbar: the window's button, or its notification area icon when it is there
+    [Theory]
+    [InlineData("Taskbar.TaskListButtonAutomationPeer", "pLaunch - 1 running window", true)]
+    [InlineData("SystemTray.NormalButton", "pLaunch", true)]                                  // the icon, on the taskbar
+    [InlineData("SystemTray.NormalButton", "pLaunch - version 0.7.0 is available", true)]     // with its notice
+    [InlineData("SystemTray.NormalButton", "pLaunch \x2013 Work", false)]                     // another list's icon
+    [InlineData("SystemTray.NormalButton", "Show hidden icons", false)]                       // the arrow: not the icon
+    [InlineData("ToggleButton", "pLaunch", false)]
+    public void DragOntoTheTaskbar_FindsTheButtonAndTheNotificationAreaIcon(string className, string name, bool own)
+    {
+        Assert.Equal(own, TaskbarHitTest.IsTaskbarIconOf(className, name, "pLaunch"));
+    }
+
     // ---- the notification area icon: what the shell's message asks for (version 4 of the messages)
 
     [Theory]
     [InlineData(0x400, "Toggle")]  // NIN_SELECT: a click
-    [InlineData(0x401, "Toggle")]  // NIN_KEYSELECT: Enter or Space on the icon
+    [InlineData(0x401, "ToggleByKey")] // NIN_KEYSELECT: Enter (sent twice) or Space on the icon
+    [InlineData(0x405, "Open")]    // NIN_BALLOONUSERCLICK: a click on the "update available" notification
     [InlineData(0x7B, "Menu")]    // WM_CONTEXTMENU: a right click, the menu key
     [InlineData(0x200, "None")]    // WM_MOUSEMOVE over the icon
     [InlineData(0x202, "None")]    // WM_LBUTTONUP: NIN_SELECT follows, counted once

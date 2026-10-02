@@ -57,6 +57,19 @@ int VisibleWindows()
     }, IntPtr.Zero);
     return count;
 }
+// A visible window of pLaunch that is not the list: a menu, a dialog
+IntPtr OtherWindow()
+{
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((h, _) =>
+    {
+        GetWindowThreadProcessId(h, out var pid);
+        if (pid != app.Id || h == hwnd || !IsWindowVisible(h) || IsIconic(h)) return true;
+        found = h;
+        return false;
+    }, IntPtr.Zero);
+    return found;
+}
 void MoveTo(int x, int y) { SetCursorPos(x, y); Thread.Sleep(250); }
 void Click(int x, int y, bool right = false)
 {
@@ -140,9 +153,46 @@ if (icon.X >= 0)
     int before = VisibleWindows();
     Click(icon.X, icon.Y, right: true);
     Check("a right click on the icon shows a menu", VisibleWindows() > before && !Shown(), $"(windows {before} -> {VisibleWindows()})");
+    var menu = OtherWindow();
+    GetWindowRect(menu, out var menuRect);
+    Check("  at the icon", Math.Abs((menuRect.L + menuRect.R) / 2 - icon.X) < 400 && menuRect.B <= icon.Y + 40 && menuRect.B > icon.Y - 400,
+        $"(menu {menuRect.L},{menuRect.T},{menuRect.R},{menuRect.B}; icon {icon.X},{icon.Y})");
     Click((bar.L + rect.L) / 2 + 200, (bar.T + bar.B) / 2); // an empty part of the taskbar, left of the notification area
     Check("  which closes when clicking elsewhere", VisibleWindows() <= before, $"(windows {VisibleWindows()})");
     Check("  and leaves the focus to another window", GetForegroundWindow() != hwnd);
+
+    // From the keyboard the shell says "selected" twice for Enter: the list opens, and stays open
+    var place = new IntPtr(((icon.Y & 0xFFFF) << 16) | (icon.X & 0xFFFF));
+    const int Callback = 0x8051, Select = 0x400, KeySelect = 0x401, ContextMenu = 0x7B;
+    PostMessage(hwnd, Callback, place, new IntPtr(KeySelect));
+    PostMessage(hwnd, Callback, place, new IntPtr(KeySelect));
+    Thread.Sleep(1200);
+    Check("Enter on the icon (two messages) opens the list once", Shown());
+
+    // With one of pLaunch's dialogs open the icon brings that to the front: nothing closes, nothing else opens
+    Click(icon.X = Icon().X, icon.Y, right: true);
+    AutomationElement? settingsItem = null;
+    foreach (AutomationElement item in AutomationElement.RootElement.FindAll(TreeScope.Descendants,
+                 new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, app.Id), new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem))))
+        if (item.Current.Name.StartsWith("Settings")) settingsItem = item;
+    Check("the menu has Settings", settingsItem != null);
+    if (settingsItem != null)
+    {
+        var r = settingsItem.Current.BoundingRectangle;
+        Click((int)(r.Left + r.Width / 2), (int)(r.Top + r.Height / 2));
+        Thread.Sleep(1500);
+        var dialog = OtherWindow();
+        int withDialog = VisibleWindows();
+        Check("Settings opens from the menu, over the list", dialog != IntPtr.Zero && Shown(), $"(windows {withDialog})");
+        PostMessage(hwnd, Callback, place, new IntPtr(Select));
+        Thread.Sleep(900);
+        Check("a click on the icon then keeps the list and the dialog", Shown() && VisibleWindows() == withDialog && IsWindowVisible(dialog), $"(windows {VisibleWindows()})");
+        PostMessage(hwnd, Callback, place, new IntPtr(ContextMenu));
+        Thread.Sleep(900);
+        Check("  and a right click shows no second menu or dialog", VisibleWindows() == withDialog, $"(windows {VisibleWindows()})");
+        PostMessage(dialog, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE: Settings
+        Thread.Sleep(800);
+    }
 }
 
 SetCursorPos(userCursor.X, userCursor.Y);

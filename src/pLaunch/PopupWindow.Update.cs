@@ -61,6 +61,7 @@ public partial class PopupWindow
         TaskbarItemInfo ??= new TaskbarItemInfo();
         TaskbarItemInfo.Overlay = UpdateBadge();
         TaskbarItemInfo.Description = UpdateText.Text;
+        TellUpdateInTray(); // no taskbar button, no badge: the notification area icon says it
         if (IsOpen)
             Place();
     }
@@ -73,6 +74,8 @@ public partial class PopupWindow
             TaskbarItemInfo.Overlay = null;
             TaskbarItemInfo.Description = "";
         }
+        if (_tray is { IsShown: true })
+            ShowTrayIcon(); // its tooltip, without the notice
         if (IsOpen)
             Place();
     }

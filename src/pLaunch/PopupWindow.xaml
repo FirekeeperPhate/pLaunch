@@ -73,8 +73,7 @@
 
         <!-- ================= List: icon and name on one row ================= -->
         <DataTemplate x:Key="ListItemTemplate" DataType="{x:Type vm:ItemViewModel}">
-            <Grid x:Name="Row" Height="{DynamicResource RowHeight}" Background="Transparent"
-                  ToolTip="{Binding ToolTip}" ToolTipService.InitialShowDelay="900">
+            <Grid x:Name="Row" Height="{DynamicResource RowHeight}" Background="Transparent">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -134,7 +133,7 @@
         <!-- ================= Tiles: big icon, name below ================= -->
         <DataTemplate x:Key="GridItemTemplate" DataType="{x:Type vm:ItemViewModel}">
             <Grid x:Name="Tile" Width="{DynamicResource TileWidth}" Height="{DynamicResource TileHeight}"
-                  Background="Transparent" ToolTip="{Binding ToolTip}" ToolTipService.InitialShowDelay="900">
+                  Background="Transparent">
                 <Border CornerRadius="4" BorderThickness="2" BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
                         Visibility="{Binding DropInto, Converter={StaticResource BoolToVisibility}}" />
                 <StackPanel Margin="0,8,0,0" VerticalAlignment="Top">
@@ -179,7 +178,7 @@
         <!-- ================= Icons only (names in the tooltip) ================= -->
         <DataTemplate x:Key="IconItemTemplate" DataType="{x:Type vm:ItemViewModel}">
             <Grid x:Name="Tile" Width="{DynamicResource TileWidth}" Height="{DynamicResource TileHeight}"
-                  Background="Transparent" ToolTip="{Binding ToolTip}" ToolTipService.InitialShowDelay="400">
+                  Background="Transparent" ToolTip="{Binding Name}" ToolTipService.InitialShowDelay="400">
                 <Border CornerRadius="4" BorderThickness="2" BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
                         Visibility="{Binding DropInto, Converter={StaticResource BoolToVisibility}}" />
                 <Grid Width="{DynamicResource IconSize}" Height="{DynamicResource IconSize}">

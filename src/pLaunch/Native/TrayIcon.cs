@@ -12,12 +12,24 @@ internal sealed class TrayIcon
     /// <summary>The message the shell sends for the icon (WM_APP + 0x51).</summary>
     public const int CallbackMessage = 0x8000 + 0x51;
 
-    public enum Action { None, Toggle, Menu }
+    public enum Action
+    {
+        None,
+        /// <summary>A click on the icon.</summary>
+        Toggle,
+        /// <summary>Enter or Space on the icon. The shell sends it twice for Enter: once is enough.</summary>
+        ToggleByKey,
+        /// <summary>A right click, the menu key.</summary>
+        Menu,
+        /// <summary>A click on the notification the icon showed.</summary>
+        Open,
+    }
 
     const int NIM_ADD = 0, NIM_MODIFY = 1, NIM_DELETE = 2, NIM_SETVERSION = 4;
-    const int NIF_MESSAGE = 0x1, NIF_ICON = 0x2, NIF_TIP = 0x4, NIF_SHOWTIP = 0x80;
+    const int NIF_MESSAGE = 0x1, NIF_ICON = 0x2, NIF_TIP = 0x4, NIF_INFO = 0x10, NIF_SHOWTIP = 0x80;
+    const int NIIF_INFO = 0x1;
     const int NOTIFYICON_VERSION_4 = 4;
-    const int NIN_SELECT = 0x400, NIN_KEYSELECT = 0x401, WM_CONTEXTMENU = 0x7B;
+    const int NIN_SELECT = 0x400, NIN_KEYSELECT = 0x401, NIN_BALLOONUSERCLICK = 0x405, WM_CONTEXTMENU = 0x7B;
     const uint Id = 1;
 
     readonly IntPtr _hwnd;
@@ -34,7 +46,7 @@ internal sealed class TrayIcon
         data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
         data.uCallbackMessage = CallbackMessage;
         data.hIcon = icon;
-        data.szTip = tip.Length > 127 ? tip[..127] : tip;
+        data.szTip = Fit(tip, 127);
         if (_shown && Shell_NotifyIcon(NIM_MODIFY, ref data))
             return true;
         // Not there (any more): added. A leftover of a previous add with the same id is taken away first.
@@ -46,6 +58,19 @@ internal sealed class TrayIcon
             Shell_NotifyIcon(NIM_SETVERSION, ref data);
         }
         return _shown;
+    }
+
+    /// <summary>A notification from the icon (a Windows toast). A click on it comes back as <see cref="Action.Open"/>.</summary>
+    public void Notify(string title, string text)
+    {
+        if (!_shown)
+            return;
+        var data = NewData();
+        data.uFlags = NIF_INFO;
+        data.szInfoTitle = Fit(title, 63);
+        data.szInfo = Fit(text, 255);
+        data.dwInfoFlags = NIIF_INFO;
+        Shell_NotifyIcon(NIM_MODIFY, ref data);
     }
 
     public void Remove()
@@ -60,19 +85,9 @@ internal sealed class TrayIcon
     /// <summary>Explorer restarted: the icon is gone with it.</summary>
     public void Forget() => _shown = false;
 
-    /// <summary>Where the icon is on screen; false when it is not shown (or hidden in the overflow).</summary>
-    public bool TryGetRect(out NativeMethods.RECT rect)
-    {
-        rect = default;
-        if (!_shown)
-            return false;
-        var id = new NOTIFYICONIDENTIFIER { cbSize = Marshal.SizeOf<NOTIFYICONIDENTIFIER>(), hWnd = _hwnd, uID = Id };
-        return Shell_NotifyIconGetRect(ref id, out rect) == 0;
-    }
-
     /// <summary>
-    /// What a <see cref="CallbackMessage"/> asks for: a click or Enter/Space on the icon toggles the popup,
-    /// a right click (or the menu key) wants the menu. The place is that of the icon (screen pixels).
+    /// What a <see cref="CallbackMessage"/> asks for. The place is that of the icon, or of the click on it
+    /// (screen pixels).
     /// </summary>
     public static (Action Action, NativeMethods.POINT At) Decode(IntPtr wParam, IntPtr lParam)
     {
@@ -81,12 +96,16 @@ internal sealed class TrayIcon
         var at = new NativeMethods.POINT { X = (short)(where & 0xFFFF), Y = (short)((where >> 16) & 0xFFFF) };
         var action = notification switch
         {
-            NIN_SELECT or NIN_KEYSELECT => Action.Toggle,
+            NIN_SELECT => Action.Toggle,
+            NIN_KEYSELECT => Action.ToggleByKey,
             WM_CONTEXTMENU => Action.Menu,
+            NIN_BALLOONUSERCLICK => Action.Open,
             _ => Action.None,
         };
         return (action, at);
     }
+
+    static string Fit(string text, int max) => text.Length > max ? text[..max] : text;
 
     NOTIFYICONDATA NewData() => new() { cbSize = Marshal.SizeOf<NOTIFYICONDATA>(), hWnd = _hwnd, uID = Id, szTip = "", szInfo = "", szInfoTitle = "" };
 
@@ -109,18 +128,6 @@ internal sealed class TrayIcon
         public IntPtr hBalloonIcon;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    struct NOTIFYICONIDENTIFIER
-    {
-        public int cbSize;
-        public IntPtr hWnd;
-        public uint uID;
-        public Guid guidItem;
-    }
-
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "Shell_NotifyIconW")]
     static extern bool Shell_NotifyIcon(int message, ref NOTIFYICONDATA data);
-
-    [DllImport("shell32.dll")]
-    static extern int Shell_NotifyIconGetRect(ref NOTIFYICONIDENTIFIER identifier, out NativeMethods.RECT rect);
 }

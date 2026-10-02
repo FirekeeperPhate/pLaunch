@@ -25,15 +25,6 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
     /// <summary>Opens inside the popup (sub-folder or live folder): rows show a chevron.</summary>
     public bool IsNavigable => Model.IsNavigable;
 
-    string? _location;
-
-    /// <summary>In search results: the sub-folder the item is in ("Work › Tools"), shown in the tooltip.</summary>
-    public string? Location
-    {
-        get => _location;
-        set { if (Set(ref _location, value)) OnPropertyChanged(nameof(ToolTip)); }
-    }
-
     public string Name
     {
         get => Model.Name;
@@ -43,7 +34,6 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
             {
                 Model.Name = value;
                 OnPropertyChanged();
-                OnPropertyChanged(nameof(ToolTip));
             }
         }
     }
@@ -51,41 +41,9 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
     /// <summary>After the model was edited in place (Properties): everything derived from it changed.</summary>
     public void NotifyModelChanged()
     {
-        foreach (var name in new[] { nameof(Name), nameof(ToolTip), nameof(Glyph), nameof(ChildInfo), nameof(IsNavigable) })
+        foreach (var name in new[] { nameof(Name), nameof(Glyph), nameof(ChildInfo), nameof(IsNavigable) })
             OnPropertyChanged(name);
     }
-
-    public string ToolTip
-    {
-        get
-        {
-            var text = Model.Kind switch
-            {
-                ItemKind.Group => $"{Model.Name} ({ChildInfo})",
-                ItemKind.Separator => "",
-                ItemKind.Command => $"{Model.Name}\n{Preview(Model.Target, 3)}",
-                ItemKind.Text => $"{Model.Name}\n{Preview(Model.Target, 6)}\n{(Model.PasteText ? "Click to paste it" : "Click to copy it")}",
-                _ when Model.IsLive && Model.Id.StartsWith(RunSuggestions.IdPrefix) => Model.Name,
-                _ => $"{Model.Name}\n{(Model.Arguments is { Length: > 0 } args ? $"{Model.Target} {args}" : Model.Target)}",
-            };
-            if (Model.Hotkey is { Length: > 0 } hotkey)
-                text += $"\nShortcut: {hotkey}";
-            if (Model.LaunchCount > 0)
-                text += $"\nOpened {Model.LaunchCount} time{(Model.LaunchCount == 1 ? "" : "s")}";
-            return _location is { Length: > 0 } location ? $"{text}\nIn: {location}" : text;
-        }
-    }
-
-    /// <summary>The first lines of a command or snippet, for the tooltip.</summary>
-    static string Preview(string text, int maxLines)
-    {
-        var lines = text.Replace("\r\n", "\n").Split('\n');
-        var shown = lines.Take(maxLines).Select(l => l.Length > 80 ? l[..79] + "\x2026" : l);
-        return string.Join("\n", shown) + (lines.Length > maxLines ? "\n\x2026" : "");
-    }
-
-    /// <summary>After a launch was counted: the tooltip shows the count.</summary>
-    public void RefreshToolTip() => OnPropertyChanged(nameof(ToolTip));
 
     /// <summary>Shortcuts inside a sub-folder (its own sub-folders included), shown next to its name.</summary>
     public string ChildInfo
@@ -100,11 +58,7 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
     }
 
     /// <summary>After a move into or out of a sub-folder: its count changed.</summary>
-    public void RefreshChildInfo()
-    {
-        OnPropertyChanged(nameof(ChildInfo));
-        OnPropertyChanged(nameof(ToolTip));
-    }
+    public void RefreshChildInfo() => OnPropertyChanged(nameof(ChildInfo));
 
     /// <summary>Segoe Fluent Icons glyph shown until (or instead of) the shell icon.</summary>
     public string Glyph => Model.Kind switch

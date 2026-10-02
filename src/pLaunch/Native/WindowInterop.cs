@@ -53,7 +53,10 @@ internal static class WindowInterop
     [DllImport("kernel32.dll")]
     static extern bool CloseHandle(IntPtr handle);
 
-    const uint GW_OWNER = 4;
+    const uint GW_OWNER = 4, GW_ENABLEDPOPUP = 6;
+
+    /// <summary>The dialog a window is showing (the enabled window it owns); zero or the window itself when none.</summary>
+    public static IntPtr EnabledPopup(IntPtr hwnd) => GetWindow(hwnd, GW_ENABLEDPOPUP);
     const int GWL_EXSTYLE = -20;
     const long WS_EX_TOOLWINDOW = 0x80;
     const int DWMWA_CLOAKED = 14;
