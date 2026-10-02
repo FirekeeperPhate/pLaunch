@@ -5,6 +5,10 @@
 The old Windows Quick Launch, for the Windows 11 taskbar: one taskbar button that opens a list of
 shortcuts (programs, files, folders, web links, Store apps).
 
+**[Download the latest release](https://github.com/FirekeeperPhate/pLaunch/releases/latest)** for
+Windows 10 and 11 (x64): the *Light* setup is small and needs the .NET 10 Desktop Runtime, the *Full* one
+includes it.
+
 ## Use
 
 - **Click** the pLaunch taskbar button to open the list, or press **Win+Alt+Space** from anywhere
