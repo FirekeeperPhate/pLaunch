@@ -1,5 +1,7 @@
 # pLaunch
 
+![pLaunch: the list opens from its taskbar button, sub-folders open beside it, typing searches](docs/demo.gif)
+
 The old Windows Quick Launch, for the Windows 11 taskbar: one taskbar button that opens a list of
 shortcuts (programs, files, folders, web links, Store apps).
 
@@ -140,6 +142,9 @@ and two white upward chevrons, vector from 24 px up and placed on the pixel grid
 `dotnet run tools/DrawIcon.cs` (`-- --preview sheet.png` also renders a preview on light and dark backgrounds).
 `dotnet run tools/DrawIcon.cs -- --symbols` draws the two notification area versions (`pLaunchWhite.ico`,
 `pLaunchBlack.ico`): the chevrons alone, white and black.
+`tools/RecordDemo.cs` records the animation at the top of this page (`docs/demo.gif`): a demo list over a
+plain backdrop, driven with the real mouse and keyboard for about 20 seconds; it needs ffmpeg:
+`dotnet run tools/RecordDemo.cs -- <pLaunch.exe>`.
 
 ## How it works
 
