@@ -61,6 +61,8 @@ public enum TrayIconStyle
     White,
     /// <summary>The symbol alone in black: for a light taskbar.</summary>
     Black,
+    /// <summary>White or black, whichever the Windows taskbar needs now (it follows the Windows mode).</summary>
+    Automatic,
 }
 
 public sealed class LauncherSettings

@@ -203,6 +203,57 @@ public static class Launcher
         return psi;
     }
 
+    static readonly HashSet<string> ProgramExtensions = new(StringComparer.OrdinalIgnoreCase) { ".exe", ".com", ".bat", ".cmd" };
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> ShortcutsToPrograms = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether files dropped on the item can be opened with it: a program or a script, or a shortcut to one
+    /// (not on a network path: reading the shortcut could hang).
+    /// </summary>
+    public static bool OpensFiles(LaunchItem item)
+    {
+        if (item.Kind != ItemKind.File)
+            return false;
+        var extension = Path.GetExtension(item.Target);
+        if (ProgramExtensions.Contains(extension))
+            return true;
+        return extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase) && !IsNetworkPath(item.Target)
+            && ShortcutsToPrograms.GetOrAdd(item.Target, lnk =>
+                NativeShellLink.GetTarget(lnk) is { } target && ProgramExtensions.Contains(Path.GetExtension(target)));
+    }
+
+    static readonly HashSet<string> ShortcutExtensions = new(StringComparer.OrdinalIgnoreCase) { ".lnk", ".url", ".appref-ms" };
+
+    /// <summary>
+    /// Whether dragged files are things a program opens (documents, folders) rather than programs and
+    /// shortcuts, which are dragged to a launcher to be added to it.
+    /// </summary>
+    public static bool AreDocuments(IEnumerable<string> files) =>
+        !files.Any(f => Path.GetExtension(f) is var extension && (ProgramExtensions.Contains(extension) || ShortcutExtensions.Contains(extension)));
+
+    /// <summary>The item's start with <paramref name="files"/> added to its arguments.</summary>
+    internal static ProcessStartInfo CreateOpenWithStartInfo(LaunchItem item, IEnumerable<string> files)
+    {
+        var psi = CreateStartInfo(item);
+        psi.Arguments = string.Join(" ", new[] { psi.Arguments }.Concat(files.Select(Quote)).Where(a => a.Length > 0));
+        return psi;
+    }
+
+    /// <summary>Opens the files with the item's program ("open with": files dropped on it). False = elevation declined.</summary>
+    public static bool OpenWith(LaunchItem item, IReadOnlyCollection<string> files)
+    {
+        NativeMethods.AllowSetForegroundWindow(NativeMethods.ASFW_ANY);
+        try
+        {
+            Process.Start(CreateOpenWithStartInfo(item, files))?.Dispose();
+            return true;
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == ErrorCancelled)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Counts a launch, for the "most used" order.</summary>
     public static void RecordLaunch(LaunchItem item)
     {

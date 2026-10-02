@@ -20,8 +20,12 @@ SetProcessDpiAwarenessContext(-4);
 var data = Path.Combine(args[1], "data");
 if (Directory.Exists(data)) Directory.Delete(data, true);
 Directory.CreateDirectory(data);
+// The list's only item: a hidden command that leaves a file behind when it is launched
+string launched = Path.Combine(Path.GetFullPath(args[1]), "launched.txt");
+File.Delete(launched);
+string command = System.Text.Json.JsonSerializer.Serialize("echo done> \"" + launched + "\"");
 File.WriteAllText(Path.Combine(data, "items.json"),
-    "{ \"Settings\": { \"IconPlace\": \"Tray\" }, \"Items\": [ { \"Id\": \"0123456789abcdef0123456789abcdef\", \"Kind\": \"Folder\", \"Name\": \"Windows\", \"Target\": \"C:/Windows\" } ] }");
+    "{ \"Settings\": { \"IconPlace\": \"Tray\" }, \"Items\": [ { \"Id\": \"0123456789abcdef0123456789abcdef\", \"Kind\": \"Command\", \"Name\": \"Marker\", \"Target\": " + command + ", \"StartWindow\": \"Hidden\" } ] }");
 Environment.SetEnvironmentVariable("PLAUNCH_DATA_DIR", data);
 using var app = Process.Start(new ProcessStartInfo(args[0], "--minimized") { UseShellExecute = true })!;
 Thread.Sleep(3500);
@@ -168,6 +172,26 @@ if (icon.X >= 0)
     PostMessage(hwnd, Callback, place, new IntPtr(KeySelect));
     Thread.Sleep(1200);
     Check("Enter on the icon (two messages) opens the list once", Shown());
+
+    // The menu lists the shortcuts: one is launched from there without opening the list
+    PostMessage(hwnd, Callback, place, new IntPtr(Select)); // closes the list
+    Thread.Sleep(900);
+    Click(icon.X = Icon().X, icon.Y, right: true);
+    AutomationElement? shortcut = null;
+    foreach (AutomationElement item in AutomationElement.RootElement.FindAll(TreeScope.Descendants,
+                 new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, app.Id), new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem))))
+        if (item.Current.Name == "Marker") shortcut = item;
+    Check("the menu lists the list's shortcuts", shortcut != null);
+    if (shortcut != null)
+    {
+        var r = shortcut.Current.BoundingRectangle;
+        Click((int)(r.Left + r.Width / 2), (int)(r.Top + r.Height / 2));
+        for (int i = 0; i < 30 && !File.Exists(launched); i++)
+            Thread.Sleep(100);
+        Check("  a click on one launches it, without opening the list", File.Exists(launched) && !Shown());
+        Thread.Sleep(2500);
+        Check("  and the focus is not left on the hidden list (the command shows no window)", GetForegroundWindow() != hwnd);
+    }
 
     // With one of pLaunch's dialogs open the icon brings that to the front: nothing closes, nothing else opens
     Click(icon.X = Icon().X, icon.Y, right: true);

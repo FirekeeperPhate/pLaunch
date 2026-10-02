@@ -102,6 +102,7 @@ public partial class PopupWindow : Window
             _hotkeys?.Dispose();
         };
         List.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(OnListScrolled));
+        HookMiddleClick(List);
 
         ApplyView();
         ApplyAppearance();
@@ -181,6 +182,8 @@ public partial class PopupWindow : Window
                 OnPopupOpened();
                 break;
             case WindowState.Minimized:
+                _stayOpen = false;
+                Topmost = false;
                 _hoverWatch.Stop();
                 CloseMenus();
                 CommitRename();
@@ -225,7 +228,7 @@ public partial class PopupWindow : Window
 
     void OnDeactivated(object? sender, EventArgs e)
     {
-        if (_suppressHide > 0 || WindowState != WindowState.Normal)
+        if (_suppressHide > 0 || _stayOpen || WindowState != WindowState.Normal)
             return;
         Dispatcher.BeginInvoke(() =>
         {
@@ -241,12 +244,13 @@ public partial class PopupWindow : Window
 
     void HoverWatch_Tick(object? sender, EventArgs e)
     {
-        if (IsActive || !IsOpen)
+        if (!IsOpen || IsActive && !_stayOpen)
         {
             _hoverWatch.Stop();
             return;
         }
-        if (IsLeftButtonDown() || IsCursorOverWindow())
+        // Inside: on the popup or a menu, in one of its dialogs, or in a context menu (it holds the mouse)
+        if (IsLeftButtonDown() || IsCursorOverWindow() || _suppressHide > 0 || Mouse.Captured != null)
         {
             _outsideTicks = 0;
             return;
@@ -357,12 +361,17 @@ public partial class PopupWindow : Window
         }
     }
 
-    static bool IsSystemDark()
+    static bool IsSystemDark() => IsDarkMode("AppsUseLightTheme");
+
+    /// <summary>The Windows mode (taskbar, Start): it can be dark while the apps are light, and the other way round.</summary>
+    static bool IsTaskbarDark() => IsDarkMode("SystemUsesLightTheme");
+
+    static bool IsDarkMode(string valueName)
     {
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            return key?.GetValue("AppsUseLightTheme") is int value && value == 0;
+            return key?.GetValue(valueName) is int value && value == 0;
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
         {
@@ -372,8 +381,11 @@ public partial class PopupWindow : Window
 
     void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
     {
-        if (e.Category == UserPreferenceCategory.General)
-            Dispatcher.BeginInvoke(ApplyAppearance);
+        if (e.Category != UserPreferenceCategory.General)
+            return;
+        Dispatcher.BeginInvoke(ApplyAppearance);
+        if (_settings.TrayIcon == TrayIconStyle.Automatic)
+            Dispatcher.BeginInvoke(ShowTrayIcon); // the taskbar may have turned light or dark
     }
 
     IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -476,7 +488,12 @@ public partial class PopupWindow : Window
             // only the web search is there
             var (first, last) = _suggestions.Text == _search ? (_suggestions.First, _suggestions.Last) : ([], []);
             target = first.Select(ViewModelFor).ToList();
-            target.AddRange(ItemSearch.Find(_root, _search).Select(found => ViewModelFor(found.Item)));
+            foreach (var (item, location) in ItemSearch.Find(_root, _search))
+            {
+                var vm = ViewModelFor(item);
+                vm.Location = location; // the sub-folder it is in, shown beside the name
+                target.Add(vm);
+            }
             target.AddRange(last.Select(ViewModelFor));
             if (RunSuggestions.WebSearchFor(_search, _settings.WebSearch) is { } webSearch)
                 target.Add(ViewModelFor(webSearch));
@@ -486,6 +503,9 @@ public partial class PopupWindow : Window
             // Live folders come sorted from the disk (folders first); saved levels follow the chosen order
             var level = CurrentLevel;
             target = (InLiveFolder ? level : ItemTree.DisplayOrder(level, _settings.Sort)).Select(ViewModelFor).ToList();
+            // No search: no row says where it is, wherever it shows (the rows found are shared with the menus)
+            foreach (var vm in _viewModels.Values)
+                vm.Location = null;
         }
         foreach (var vm in target)
         {
@@ -842,7 +862,11 @@ public partial class PopupWindow : Window
         Refresh(vm.Model.Id);
     }
 
-    void Launch(ItemViewModel item, bool asAdmin = false, bool newWindow = false)
+    /// <summary>
+    /// Launches the item and closes the list; with <paramref name="keepOpen"/> (a middle click) the list stays
+    /// for the next one, until the pointer leaves it.
+    /// </summary>
+    void Launch(ItemViewModel item, bool asAdmin = false, bool newWindow = false, bool keepOpen = false)
     {
         if (Launcher.IsMissing(item.Model))
         {
@@ -851,14 +875,19 @@ public partial class PopupWindow : Window
             return;
         }
         // Gone at once, while the shell starts the program (a Start menu app keeps it busy a moment)
-        Cloak(true);
+        if (!keepOpen)
+            Cloak(true);
         try
         {
-            // Launch first: while pLaunch is still the foreground app the new window may take the focus
-            if (Launcher.Launch(item.Model, asAdmin, newWindow))
+            // Launch first: while pLaunch is still the foreground app the new window may take the focus.
+            // A snippet is only copied when the list stays: there is no window to paste it into yet.
+            if (Launcher.Launch(item.Model, asAdmin, newWindow, paste: !keepOpen))
             {
                 CountLaunches([item.Model]); // saved before the popup goes: an error is shown with it
-                HidePopup();
+                if (keepOpen)
+                    StayOpen();
+                else
+                    HidePopup();
             }
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
@@ -869,6 +898,43 @@ public partial class PopupWindow : Window
         {
             Cloak(false); // minimized by now, or back as it was (a declined elevation)
         }
+    }
+
+    bool _stayOpen; // after a middle click: losing the focus to what was launched does not close the list
+
+    /// <summary>
+    /// The list stays open, above the window that just opened, for launching something else. It closes
+    /// when the pointer has left it for a moment (or with Esc, or a click on the taskbar button).
+    /// </summary>
+    void StayOpen()
+    {
+        _stayOpen = true;
+        Topmost = true;
+        _outsideTicks = 0;
+        _hoverWatch.Start();
+    }
+
+    /// <summary>A middle click on a shortcut launches it and keeps the list open (a list, or a menu's).</summary>
+    void HookMiddleClick(ListBox list)
+    {
+        ItemViewModel? pressed = null;
+        list.PreviewMouseDown += (_, e) =>
+        {
+            if (e.ChangedButton == MouseButton.Middle)
+                pressed = ItemAt(e.OriginalSource);
+        };
+        list.PreviewMouseUp += (_, e) =>
+        {
+            if (e.ChangedButton != MouseButton.Middle)
+                return;
+            var item = pressed;
+            pressed = null;
+            if (item is { IsSeparator: false, IsNavigable: false, IsEditing: false } && ItemAt(e.OriginalSource) == item)
+            {
+                e.Handled = true;
+                Launch(item, keepOpen: true);
+            }
+        };
     }
 
     /// <summary>
@@ -1591,6 +1657,7 @@ public partial class PopupWindow : Window
     void OnDragEnter(object sender, DragEventArgs e)
     {
         _dragAcceptable = !InLiveFolder && IsAcceptable(e.Data); // a live folder shows the disk: nothing is dropped into it
+        _dragOffersFiles = OffersFiles(e.Data);
         OnDragOver(sender, e);
     }
 
@@ -1610,13 +1677,65 @@ public partial class PopupWindow : Window
         if (into != null)
         {
             ShowDropMarker(into, DropMarker.Into);
-            SetSpringTarget(into);
+            SetSpringTarget(into.IsGroup ? into : null); // a program does not open like a folder
         }
         else
         {
             ShowInsertMarker(index);
             SetSpringTarget(null);
         }
+    }
+
+    bool _dragOffersFiles; // what is dragged over the list are documents from elsewhere: a program can open them
+
+    bool OffersFiles(IDataObject data) => FilesToOpen(data) != null;
+
+    /// <summary>
+    /// The dragged files a program of the list could open; null when there are none, or when programs or
+    /// shortcuts are among them: those are being added to the list, wherever they are dropped.
+    /// </summary>
+    string[]? FilesToOpen(IDataObject data)
+    {
+        if (IsOwnDrag(data) || !data.GetDataPresent(DataFormats.FileDrop))
+            return null;
+        try
+        {
+            return data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files && Launcher.AreDocuments(files) ? files : null;
+        }
+        catch (COMException)
+        {
+            return null; // the source went away
+        }
+    }
+
+    /// <summary>
+    /// Files dropped on a program (the middle of it, like into a sub-folder) are opened with it, as on the
+    /// old Quick Launch; the list then closes like after a launch. True when that is what the drop was.
+    /// </summary>
+    bool DropOpensWith(ItemViewModel? target, IDataObject data)
+    {
+        if (target == null || target.IsGroup)
+            return false;
+        if (FilesToOpen(data) is not { } files)
+            return true; // on a program, with nothing it could open: nothing happens
+        Cloak(true);
+        try
+        {
+            if (Launcher.OpenWith(target.Model, files))
+            {
+                CountLaunches([target.Model]);
+                HidePopup();
+            }
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            ShowError($"Cannot open \"{target.Name}\".", ex.Message);
+        }
+        finally
+        {
+            Cloak(false);
+        }
+        return true;
     }
 
     void OnDrop(object sender, DragEventArgs e)
@@ -1633,7 +1752,7 @@ public partial class PopupWindow : Window
         // A saved item of this list moves; a live folder entry (not saved) is added like any file
         if (IsOwnDrag(e.Data) && e.Data.GetData(InternalDragFormat) is string id && ItemTree.Find(_root, id) is { } item)
         {
-            if (into != null)
+            if (into is { IsGroup: true })
                 MoveInto(item, into.Model);
             else if (!IsSearching)
                 MoveTo(item, index);
@@ -1642,6 +1761,8 @@ public partial class PopupWindow : Window
 
         try
         {
+            if (DropOpensWith(into, e.Data))
+                return;
             var dropped = DropReader.Read(e.Data);
             if (into != null)
             {
@@ -1701,7 +1822,8 @@ public partial class PopupWindow : Window
 
         int index = items.IndexOf(hit);
         bool draggingThis = hit.Model.Id == _draggingId;
-        if (hit.IsGroup && !draggingThis)
+        // Into a sub-folder, or (files from elsewhere) onto a program that opens them
+        if (!draggingThis && (hit.IsGroup || _dragOffersFiles && Launcher.OpensFiles(hit.Model)))
         {
             var inner = rows
                 ? new Rect(hitRect.Left, hitRect.Top + hitRect.Height * 0.25, hitRect.Width, hitRect.Height * 0.5)

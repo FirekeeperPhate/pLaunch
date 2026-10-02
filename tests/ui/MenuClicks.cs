@@ -176,6 +176,17 @@ static int Run(string outDir)
         Wait(400);
         Check("real: pointing at the folder opens its menu", menusOf(w).Count == 1);
 
+        // 2a. The folder is highlighted while its menu is open; pointing at another row closes the menu
+        // and takes the highlight away
+        Check("real: the folder is highlighted while its menu is open", list.SelectedItem == vmsOf(w)[0]);
+        MoveTo(Center((ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(vmsOf(w)[1])));
+        Wait(600);
+        Check("real: pointing at another row closes the menu", menusOf(w).Count == 0);
+        Check("real: and the folder is no longer highlighted", list.SelectedItem == null, $"(selected {(list.SelectedItem as ItemViewModel)?.Name})");
+        MoveTo(Center(folderRow));
+        Wait(500);
+        Check("real: pointing at the folder again opens its menu", menusOf(w).Count == 1);
+
         // 2b. A menu opened by pointing leaves the keyboard to the list: Down moves there, not in the menu
         for (int i = 0; i < 2; i++) // the first Down only brings the focus to the list's first row
         {
@@ -268,6 +279,54 @@ static int Run(string outDir)
         Check("real: Right on a program row does nothing", menusOf(w).Count == 1 && menusOf(w)[0] == keyMenu && keyList!.SelectedIndex == 0);
         Press(0x28);
         Check("real: Down moves in the keyboard's menu", keyList!.SelectedIndex == 1);
+        Press(0x1B);
+
+        // 8. A middle click launches and keeps the list (and the menu) open, until the pointer leaves them
+        File.Delete(marker);
+        list.SelectedItem = null;
+        MoveTo(Center((ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(vmsOf(w)[1])));
+        Wait(300);
+        MoveTo(Center(folderRow));
+        Wait(600);
+        var stayMenu = menusOf(w).FirstOrDefault();
+        Check("real: the menu is open for the middle click", stayMenu != null);
+        if (stayMenu != null)
+        {
+            var row = stayMenu.RowOf(stayMenu.Items.First(i => i.Model.Id == command.Id))!;
+            var at = Center(row);
+            MoveTo(new Point(at.X - 60, at.Y));
+            Wait(200);
+            MoveTo(at);
+            Wait(120);
+            MouseEvent(0x0020, 0, 0); // middle button
+            Wait(60);
+            MouseEvent(0x0040, 0, 0);
+            Wait(2500);
+            Check("real: a middle click launches the item", File.Exists(marker));
+            Check("real: and the list stays open", w.WindowState == WindowState.Normal && w.IsVisible);
+            MoveTo(new Point(at.X - 900, at.Y - 500));
+            Wait(1800);
+            Check("real: until the pointer leaves it", w.WindowState == WindowState.Minimized);
+        }
+
+        // 9. A search result says which sub-folder it is in; after the search no row does (the rows are
+        // shared with the menus, which would show it too)
+        ShowWindow(hwnd, 9);
+        Wait(600);
+        Click(new Point(mb.X - 120, mb.Y));
+        Wait(300);
+        foreach (byte key in "WRITE"u8.ToArray())
+        {
+            keybd_event(key, 0, 0, IntPtr.Zero);
+            keybd_event(key, 0, 2, IntPtr.Zero);
+            Wait(80);
+        }
+        Wait(700);
+        var found = vmsOf(w).FirstOrDefault(v => v.Model.Id == command.Id);
+        Check("real: a search result says where it is", found?.Location == "Tools", $"(location '{found?.Location}')");
+        Press(0x1B); // clears the search
+        Wait(400);
+        Check("real: and no longer after the search", found != null && found.Location == null && !found.HasLocation);
         Press(0x1B);
         w.Close();
     }

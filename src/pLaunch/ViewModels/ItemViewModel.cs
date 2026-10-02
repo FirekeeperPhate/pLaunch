@@ -25,6 +25,17 @@ public sealed class ItemViewModel(LaunchItem model) : INotifyPropertyChanged
     /// <summary>Opens inside the popup (sub-folder or live folder): rows show a chevron.</summary>
     public bool IsNavigable => Model.IsNavigable;
 
+    string? _location;
+
+    /// <summary>In search results: the sub-folder the item is in ("Work › Tools"), shown small beside its name.</summary>
+    public string? Location
+    {
+        get => _location;
+        set { if (Set(ref _location, value)) OnPropertyChanged(nameof(HasLocation)); }
+    }
+
+    public bool HasLocation => !string.IsNullOrEmpty(_location);
+
     public string Name
     {
         get => Model.Name;

@@ -101,6 +101,12 @@
                          Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibility}}"
                          KeyDown="RenameBox_KeyDown" LostKeyboardFocus="RenameBox_LostKeyboardFocus" />
 
+                <!-- Search results: the sub-folder the item is in -->
+                <TextBlock x:Name="LocationText" Grid.Column="2" Margin="8,0,2,0" MaxWidth="160" VerticalAlignment="Center" FontSize="12"
+                           Text="{Binding Location}" TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                           Visibility="{Binding HasLocation, Converter={StaticResource BoolToVisibility}}" />
+
                 <!-- Sub-folders: how many shortcuts, and a chevron (a click opens it) -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal"
                             Visibility="{Binding IsNavigable, Converter={StaticResource BoolToVisibility}}">
@@ -123,6 +129,10 @@
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsGroup}" Value="True">
                     <Setter TargetName="FallbackGlyph" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                </DataTrigger>
+                <!-- A sub-folder found by the search shows its count there instead -->
+                <DataTrigger Binding="{Binding IsNavigable}" Value="True">
+                    <Setter TargetName="LocationText" Property="Visibility" Value="Collapsed" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsMissing}" Value="True">
                     <Setter TargetName="Row" Property="Opacity" Value="0.45" />

@@ -106,6 +106,18 @@ public static class ItemTree
     }
 
     /// <summary>
+    /// The shortcuts to offer in a short menu: the most launched ones of any level (then the most recent),
+    /// most used first; while nothing was ever launched, the first ones of the list.
+    /// </summary>
+    public static List<LaunchItem> MostUsed(IReadOnlyList<LaunchItem> items, int max)
+    {
+        var all = Launchables(items, "").Select(l => l.Item).ToList();
+        var used = all.Where(i => i.LaunchCount > 0)
+            .OrderByDescending(i => i.LaunchCount).ThenByDescending(i => i.LastLaunched ?? DateTime.MinValue);
+        return (all.Any(i => i.LaunchCount > 0) ? used : all.AsEnumerable()).Take(max).ToList();
+    }
+
+    /// <summary>
     /// "3 shortcuts, 1 sub-folder" for what a group holds at any depth, or null when it holds nothing
     /// worth confirming (empty, or separators only).
     /// </summary>

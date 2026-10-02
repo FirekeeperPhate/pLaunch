@@ -6,15 +6,19 @@ shortcuts (programs, files, folders, web links, Store apps).
 ## Use
 
 - **Click** the pLaunch taskbar button to open the list, or press **Win+Alt+Space** from anywhere
-  (changeable in Settings); click an item to launch it.
+  (changeable in Settings); click an item to launch it. A **middle click** launches it and keeps the
+  list open for the next one, until the pointer leaves the list.
 - **Notification area icon**: Settings → *Icon of this list* puts the icon on the taskbar, in the
   notification area (beside the clock), or both. The icon there works like the taskbar button: a click
-  opens the list beside it, another one closes it; a right click has Open, Settings and Exit. Windows
+  opens the list beside it, another one closes it; a right click lists the most used shortcuts (to launch
+  one without opening the list), then Open, Settings and Exit. Windows
   keeps new icons among the hidden ones (the arrow): drag it out to have it always in sight.
   *Notification area icon* chooses its look: the standard icon, or the symbol alone in white or in
-  black, like the Windows icons there (white for a dark taskbar, black for a light one).
+  black, like the Windows icons there (white for a dark taskbar, black for a light one), or
+  *Automatic*: white or black, following the Windows mode.
 - **Search**: just start typing in the open list. It finds items in every sub-folder (accents and case
-  don't matter; best matches and the most used first); Enter launches the first result, Esc clears.
+  don't matter; best matches and the most used first), each with the sub-folder it is in; Enter launches
+  the first result, Esc clears.
 - **Run box**: the search box also opens what you type, like Win+R: a path (`C:\Projects`, `%TEMP%`),
   a web address (`github.com`, `localhost:3000`), a `shell:` folder or a command (`cmd`,
   `ping 1.1.1.1`). Below the results a web search is offered (Google, Bing, DuckDuckGo, or off in
@@ -32,6 +36,10 @@ shortcuts (programs, files, folders, web links, Store apps).
   hold there for a moment: the list opens and you drop into it (also for programs and shortcuts to them,
   for which Windows offers "Pin to taskbar" and moves the buttons aside). The *Add* button and **Ctrl+V**
   work too.
+- **Open with**: drop documents or folders on a program of the list (the middle of it, as into a
+  sub-folder) and it
+  opens them, like the old Quick Launch. Dropped between items, they are added; programs and shortcuts
+  are always added, wherever they are dropped.
 - **Right click** an item: open, run as administrator, open file location, rename, remove, and add a
   sub-folder or a separator right after it. Drag items to reorder them.
 - **Sub-folders** (Add → New sub-folder) open in a **menu beside the list**, as tall as their content,
@@ -119,6 +127,9 @@ showing up again, focus back to the window in front, slow clicks):
 `dotnet run tests/ui/TaskbarButton.cs -- <pLaunch.exe> <output folder>`.
 `tests/ui/TrayIcon.cs` does the same for the notification area icon (no taskbar button, click to open and
 close, the right-click menu): `dotnet run tests/ui/TrayIcon.cs -- <pLaunch.exe> <output folder>`.
+`tests/ui/DragAndDrop.cs` drags a file from a File Explorer window: held on the taskbar button it opens the
+list, dropped below the items it is added, dropped on a program it is opened with it:
+`dotnet run tests/ui/DragAndDrop.cs -- <pLaunch.exe> <output folder>`.
 
 Installers (needs Inno Setup 6 or 7): `installer\build.ps1` runs the tests, publishes `publish\light` and
 `publish\full` and writes `installer\Output\pLaunch-Setup-<version>-<Light|Full>.exe`; the version comes

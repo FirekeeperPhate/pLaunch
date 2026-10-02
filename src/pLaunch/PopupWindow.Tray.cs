@@ -4,6 +4,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using pLaunch.Models;
 using pLaunch.Native;
+using pLaunch.Services;
 
 namespace pLaunch;
 
@@ -98,7 +99,10 @@ public partial class PopupWindow
     /// </summary>
     IntPtr TrayIconHandle()
     {
-        if (_settings.TrayIcon != TrayIconStyle.Standard && SymbolIcon(_settings.TrayIcon) is var symbol && symbol != IntPtr.Zero)
+        var style = _settings.TrayIcon == TrayIconStyle.Automatic
+            ? (IsTaskbarDark() ? TrayIconStyle.White : TrayIconStyle.Black)
+            : _settings.TrayIcon;
+        if (style != TrayIconStyle.Standard && SymbolIcon(style) is var symbol && symbol != IntPtr.Zero)
             return symbol;
         const int WM_GETICON = 0x007F, ICON_SMALL = 0, ICON_SMALL2 = 2;
         var icon = NativeMethods.SendMessage(_hwnd, WM_GETICON, ICON_SMALL2, IntPtr.Zero);
@@ -213,15 +217,65 @@ public partial class PopupWindow
     void ShowTrayMenu(NativeMethods.POINT at)
     {
         double scale = VisualTreeHelperDpi();
+        LaunchItem? chosen = null;
         var menu = new ContextMenu { Placement = PlacementMode.AbsolutePoint, HorizontalOffset = at.X / scale, VerticalOffset = at.Y / scale };
+        // The most used shortcuts, to launch without opening the list (the taskbar button has its jump list)
+        foreach (var item in ItemTree.MostUsed(_root, TrayMenuItems))
+        {
+            var entry = new MenuItem { Header = item.Name.Replace("_", "__") }; // "_" would mark an access key
+            entry.Click += (_, _) => chosen = item;
+            menu.Items.Add(entry);
+            LoadMenuIcon(entry, item, scale);
+        }
+        if (menu.Items.Count > 0)
+            menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem("Open", () => OpenFromTray(at), "\xE8A7"));
         menu.Items.Add(CreateMenuItem("Settings\x2026", () => { OpenFromTray(at); OpenSettings(); }, "\xE713"));
         menu.Items.Add(new Separator());
         menu.Items.Add(CreateMenuItem("Exit", Close, "\xE711"));
         // A menu of a window that is not in front would stay open when clicking elsewhere
         WindowInterop.SetForegroundWindow(_hwnd);
-        menu.Closed += (_, _) => Dispatcher.BeginInvoke(PassFocusOn, DispatcherPriority.Background);
+        menu.Closed += (_, _) => Dispatcher.BeginInvoke(() => AfterTrayMenu(chosen), DispatcherPriority.Background);
         menu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// The menu made the minimized popup the window in front, where no key should go. Closed without a
+    /// choice, the focus goes back to the window that had it. A snippet is launched after that, so it is
+    /// pasted there. Anything else is launched first (pLaunch in front lets the new window take the focus),
+    /// and the focus goes back a moment later only if what was launched took none (a hidden command).
+    /// </summary>
+    void AfterTrayMenu(LaunchItem? chosen)
+    {
+        if (chosen == null)
+        {
+            PassFocusOn();
+        }
+        else if (chosen.Kind == ItemKind.Text)
+        {
+            PassFocusOn();
+            LaunchFromHotkey(chosen.Id);
+        }
+        else
+        {
+            LaunchFromHotkey(chosen.Id);
+            var later = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+            later.Tick += (_, _) =>
+            {
+                later.Stop();
+                PassFocusOn();
+            };
+            later.Start();
+        }
+    }
+
+    const int TrayMenuItems = 8;
+
+    /// <summary>The item's icon beside its menu entry, once it is loaded (the menu does not wait for it).</summary>
+    static async void LoadMenuIcon(MenuItem entry, LaunchItem item, double scale)
+    {
+        if (await IconProvider.GetAsync(item, (int)Math.Round(16 * scale)) is { } icon)
+            entry.Icon = new Image { Source = icon, Width = 16, Height = 16 };
     }
 
     void RemoveTrayIcon()

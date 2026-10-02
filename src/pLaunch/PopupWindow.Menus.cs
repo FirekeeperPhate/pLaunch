@@ -127,6 +127,7 @@ public partial class PopupWindow
         PlaceMenu(menu, row, level); // Show applies the window's own size first
 
         // The folder it came from stays highlighted while its menu is open
+        menu.SelectionBefore = ListAt(level).SelectedItem;
         ListAt(level).SelectedItem = folder;
         if (selectFirst)
         {
@@ -144,6 +145,12 @@ public partial class PopupWindow
             _menus.RemoveAt(i);
             foreach (var item in menu.Items)
                 item.DropMarker = DropMarker.None;
+            // The folder was highlighted for its open menu: with the menu gone, so is the highlight. The
+            // list's selection goes back to what it was (the row the keyboard was on, the folder itself
+            // included); a menu opened with the keys leaves the keyboard on its folder.
+            var parent = ListAt(i);
+            if (!menu.KeyboardActive && parent.SelectedItem is ItemViewModel selected && selected.Model == menu.Folder)
+                parent.SelectedItem = menu.SelectionBefore != null && parent.Items.Contains(menu.SelectionBefore) ? menu.SelectionBefore : null;
             menu.Close();
         }
         if (_menuHover.Level > _menus.Count)
@@ -282,6 +289,7 @@ public partial class PopupWindow
     void HookMenu(FolderMenu menu)
     {
         menu.List.PreviewMouseLeftButtonDown += (_, e) => MenuMouseDown(menu, e);
+        HookMiddleClick(menu.List);
         menu.List.PreviewMouseMove += (_, e) => MenuMouseMove(menu, e);
         menu.List.PreviewMouseLeftButtonUp += (_, e) => MenuMouseUp(menu, e);
         menu.List.PreviewMouseRightButtonDown += (_, e) =>
@@ -598,7 +606,10 @@ public partial class PopupWindow
         e.Handled = true;
         _dragLeaveTimer.Stop();
         if (e.RoutedEvent == DragEnterEvent)
+        {
             _menuDragAcceptable = menu.Folder.Kind == ItemKind.Group && IsAcceptable(e.Data);
+            _dragOffersFiles = OffersFiles(e.Data);
+        }
         ClearDropMarkers();
         if (!_menuDragAcceptable)
         {
@@ -613,7 +624,7 @@ public partial class PopupWindow
             ShowInsertMarker(index, menu.Items);
         // Holding the drag over a sub-folder opens it, after the same wait as in the popup's list (a drag
         // crosses folders on its way to where it drops)
-        ScheduleMenuHover(into, _menus.IndexOf(menu) + 1, SpringDelay);
+        ScheduleMenuHover(into is { IsGroup: true } ? into : null, _menus.IndexOf(menu) + 1, SpringDelay);
     }
 
     void MenuDrop(FolderMenu menu, DragEventArgs e)
@@ -628,7 +639,7 @@ public partial class PopupWindow
         var anchor = index < menu.Items.Count ? menu.Items[index].Model : null;
         if (IsOwnDrag(e.Data) && e.Data.GetData(InternalDragFormat) is string id && ItemTree.Find(_root, id) is { } item)
         {
-            if (into != null)
+            if (into is { IsGroup: true })
                 MoveInto(item, into.Model);
             else
                 MoveToLevel(item, menu.Folder, anchor);
@@ -636,6 +647,8 @@ public partial class PopupWindow
         }
         try
         {
+            if (DropOpensWith(into, e.Data))
+                return;
             var dropped = DropReader.Read(e.Data);
             var target = into != null ? (into.Model.Children ??= []) : level;
             int at = into != null || anchor == null ? target.Count : target.IndexOf(anchor);

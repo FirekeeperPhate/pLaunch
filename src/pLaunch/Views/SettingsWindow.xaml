@@ -110,6 +110,7 @@
                         <ComboBoxItem Content="Standard" />
                         <ComboBoxItem Content="White symbol" />
                         <ComboBoxItem Content="Black symbol" />
+                        <ComboBoxItem Content="Automatic (white or black)" />
                     </ComboBox>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">

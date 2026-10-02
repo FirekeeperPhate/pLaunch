@@ -38,6 +38,9 @@ public partial class FolderMenu : Window
     /// </summary>
     public bool KeyboardActive { get; set; }
 
+    /// <summary>What was selected in the list this menu opened from, before its folder was highlighted for it.</summary>
+    public object? SelectionBefore { get; set; }
+
     public IntPtr Handle { get; private set; }
 
     /// <summary>Creates the window handle without showing it, so it can be sized and placed first.</summary>
