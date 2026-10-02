@@ -8,6 +8,7 @@ internal static class NativeMethods
     // ---- Window management ----
 
     public const int WM_SYSCOMMAND = 0x0112;
+    public const int WM_DESTROY = 0x0002;
     public const int SC_MAXIMIZE = 0xF030;
     public const int SC_RESTORE = 0xF120;
     public const uint SWP_NOZORDER = 0x0004;
@@ -28,6 +29,14 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetCursorPos(out POINT point);
+
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    public static extern IntPtr SendMessage(IntPtr hwnd, int msg, nint wParam, IntPtr lParam);
+
+    public const int SM_CXSMICON = 49; // the width of a small icon (16 at 100 %)
+
+    [DllImport("user32.dll")]
+    public static extern int GetSystemMetrics(int index);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

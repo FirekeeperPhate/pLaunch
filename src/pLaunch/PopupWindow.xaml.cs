@@ -136,7 +136,7 @@ public partial class PopupWindow : Window
         ShowActivated = !minimized;
         Show();
         ShowActivated = true;
-        _taskbarButton?.Request();
+        ApplyIconPlace(); // the taskbar button, the notification area icon, or both
         StartDragWatch();
         QueueIconLoad();
         ScheduleJumpList();
@@ -200,7 +200,11 @@ public partial class PopupWindow : Window
 
     void OnPopupOpened()
     {
-        NativeMethods.GetCursorPos(out _anchor);
+        if (_openAt is { } place)
+            _anchor = place;
+        else
+            NativeMethods.GetCursorPos(out _anchor);
+        _openAt = null;
         RememberPointerAtOpen();
         Place();
         if (ActivateOnOpen)
@@ -391,6 +395,19 @@ public partial class PopupWindow : Window
             // popup stays closed, without showing up again for a moment first.
             handled = true;
             Dispatcher.BeginInvoke(PassFocusOn, DispatcherPriority.Background);
+        }
+        else if (msg == TrayIcon.CallbackMessage)
+        {
+            OnTrayMessage(wParam, lParam);
+        }
+        else if (msg == TaskbarTab.TaskbarCreatedMessage)
+        {
+            _tray?.Forget(); // Explorer restarted: the notification area is new
+            ShowTrayIcon();
+        }
+        else if (msg == NativeMethods.WM_DESTROY)
+        {
+            RemoveTrayIcon();
         }
         _taskbarButton?.HandleMessage(msg, lParam);
         return IntPtr.Zero;

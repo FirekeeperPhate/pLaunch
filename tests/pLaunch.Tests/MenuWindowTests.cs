@@ -199,6 +199,117 @@ public sealed class MenuWindowTests
         Assert.False(click.Take(T0.AddMilliseconds(50)));
     }
 
+    // ---- the notification area icon: what the shell's message asks for (version 4 of the messages)
+
+    [Theory]
+    [InlineData(0x400, "Toggle")]  // NIN_SELECT: a click
+    [InlineData(0x401, "Toggle")]  // NIN_KEYSELECT: Enter or Space on the icon
+    [InlineData(0x7B, "Menu")]    // WM_CONTEXTMENU: a right click, the menu key
+    [InlineData(0x200, "None")]    // WM_MOUSEMOVE over the icon
+    [InlineData(0x202, "None")]    // WM_LBUTTONUP: NIN_SELECT follows, counted once
+    public void TrayIconMessage_IsAClickAMenuOrNothing(int notification, string expected)
+    {
+        // lParam: the notification in the low word, the icon's id in the high one; wParam: where the icon is
+        var lParam = new IntPtr((1 << 16) | notification);
+        var wParam = new IntPtr((1040 << 16) | 1575);
+        var (action, at) = TrayIcon.Decode(wParam, lParam);
+        Assert.Equal(expected, action.ToString());
+        Assert.Equal((1575, 1040), (at.X, at.Y));
+    }
+
+    [Fact]
+    public void TrayIconMessage_OnAMonitorToTheLeft_HasNegativeCoordinates()
+    {
+        var wParam = new IntPtr(((1040 & 0xFFFF) << 16) | (-300 & 0xFFFF));
+        Assert.Equal(-300, TrayIcon.Decode(wParam, new IntPtr(0x400)).At.X);
+    }
+
+    [Fact]
+    public void TaskbarButton_Withdrawn_IsTakenAwayAndNotAskedForAgain_UntilWantedAgain() => OnSta(() =>
+    {
+        var shell = new FakeShell();
+        var button = shell.Button();
+        button.Request();
+        Pump(40);
+        button.HandleMessage(TaskbarTab.TaskbarButtonCreatedMessage, IntPtr.Zero);
+        shell.Requests = 0;
+
+        button.Withdraw(); // "notification area only"
+        Assert.Equal(1, shell.Removals);
+        Assert.False(button.IsShown);
+        button.HandleMessage(TaskbarTab.TaskbarCreatedMessage, IntPtr.Zero); // Explorer restarts
+        Pump(150);
+        Assert.Equal(0, shell.Requests);
+
+        button.Request(); // back on the taskbar
+        Pump(40);
+        Assert.True(shell.Requests >= 1);
+    });
+
+    // An icon file with images of these widths (the image bytes are just markers)
+    static byte[] IcoWith(params int[] widths)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write((short)0);
+        writer.Write((short)1);
+        writer.Write((short)widths.Length);
+        int offset = 6 + 16 * widths.Length;
+        foreach (int width in widths)
+        {
+            writer.Write((byte)(width >= 256 ? 0 : width));
+            writer.Write((byte)(width >= 256 ? 0 : width));
+            writer.Write((short)0);
+            writer.Write((short)1);
+            writer.Write((short)32);
+            writer.Write(4);
+            writer.Write(offset);
+            offset += 4;
+        }
+        foreach (int width in widths)
+            writer.Write(width);
+        return stream.ToArray();
+    }
+
+    [Theory]
+    [InlineData(16, 16)]   // the very size
+    [InlineData(24, 24)]
+    [InlineData(22, 24)]   // none of that size: the next bigger one, scaled down
+    [InlineData(40, 256)]
+    [InlineData(300, 256)] // bigger than any: the biggest
+    public void SymbolIcon_UsesTheImageOfTheRightSize(int wanted, int expected)
+    {
+        var ico = IcoWith(32, 16, 256, 24);
+        var entry = IconFile.PickEntry(ico, wanted);
+        Assert.NotNull(entry);
+        Assert.Equal(expected, entry.Value.Width);
+        Assert.Equal(expected, BitConverter.ToInt32(ico, entry.Value.Offset)); // its own bytes
+    }
+
+    [Fact]
+    public void NotAnIconFile_GivesNoIcon()
+    {
+        Assert.Null(IconFile.PickEntry([1, 2, 3], 16));
+        Assert.Null(IconFile.PickEntry(new byte[64], 16)); // no images in it
+        Assert.Equal(IntPtr.Zero, IconFile.Load([0, 0, 2, 0, 1, 0], 16));
+    }
+
+    [Fact]
+    public void SymbolIcons_AreReadFromTheProgramAtEverySize()
+    {
+        foreach (var name in new[] { "pLaunchWhite.ico", "pLaunchBlack.ico" })
+        {
+            var ico = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "pLaunch", "Assets", name));
+            foreach (int size in new[] { 16, 20, 24, 32 })
+            {
+                Assert.Equal(size, IconFile.PickEntry(ico, size)!.Value.Width);
+                var icon = IconFile.Load(ico, size);
+                Assert.NotEqual(IntPtr.Zero, icon);
+                ShellInterop.DestroyIcon(icon);
+            }
+        }
+    }
+
     // ---- the taskbar button's life (the shell faked: requests and removals are counted)
 
     const int WM_DESTROY = 0x0002;

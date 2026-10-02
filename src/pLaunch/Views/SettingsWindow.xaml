@@ -94,6 +94,24 @@
                 </DockPanel>
                 <TextBlock x:Name="HotkeyStatus" Margin="0,0,0,6" FontSize="12" TextWrapping="Wrap"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                            ToolTip="Windows puts new notification area icons in the hidden ones (the arrow beside the clock): drag the icon out onto the taskbar to keep it in sight">
+                    <TextBlock Text="Icon of this list" Style="{StaticResource Label}" />
+                    <ComboBox x:Name="IconPlaceBox" MinWidth="170" SelectionChanged="IconPlaceBox_SelectionChanged">
+                        <ComboBoxItem Content="On the taskbar" />
+                        <ComboBoxItem Content="In the notification area" />
+                        <ComboBoxItem Content="Both" />
+                    </ComboBox>
+                </StackPanel>
+                <StackPanel x:Name="TrayIconPanel" Orientation="Horizontal" Margin="0,8,0,0"
+                            ToolTip="The symbol alone, like the Windows icons beside the clock: white for a dark taskbar, black for a light one">
+                    <TextBlock Text="Notification area icon" Style="{StaticResource Label}" />
+                    <ComboBox x:Name="TrayIconBox" MinWidth="170" SelectionChanged="TrayIconBox_SelectionChanged">
+                        <ComboBoxItem Content="Standard" />
+                        <ComboBoxItem Content="White symbol" />
+                        <ComboBoxItem Content="Black symbol" />
+                    </ComboBox>
+                </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                     <TextBlock Text="Sub-folders open" Style="{StaticResource Label}" />
                     <ComboBox x:Name="SubFoldersBox" MinWidth="170" SelectionChanged="SubFoldersBox_SelectionChanged">

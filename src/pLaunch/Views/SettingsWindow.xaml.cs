@@ -55,6 +55,9 @@ public partial class SettingsWindow : Window
             : $"{s.Hotkey} is not active: another program or list uses it. Choose another one.";
         WebSearchBox.SelectedIndex = (int)s.WebSearch;
         SubFoldersBox.SelectedIndex = (int)s.SubFolders;
+        IconPlaceBox.SelectedIndex = (int)s.IconPlace;
+        TrayIconBox.SelectedIndex = (int)s.TrayIcon;
+        TrayIconPanel.IsEnabled = s.IconPlace != IconPlace.Taskbar;
         ButtonIconPanel.Visibility = _popup.Profile.IsDefault ? Visibility.Collapsed : Visibility.Visible;
         DefaultButtonIconButton.IsEnabled = s.ButtonIconPath != null;
         DataFolderText.Text = "Data folder: " + AppConfig.DataDirectoryPath;
@@ -150,6 +153,20 @@ public partial class SettingsWindow : Window
     void TranslucentBox_Click(object sender, RoutedEventArgs e) => _popup.SetTranslucent(TranslucentBox.IsChecked == true);
 
     void WebIconsBox_Click(object sender, RoutedEventArgs e) => _popup.SetWebIcons(WebIconsBox.IsChecked == true);
+
+    void IconPlaceBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || IconPlaceBox.SelectedIndex < 0)
+            return;
+        _popup.SetIconPlace((IconPlace)IconPlaceBox.SelectedIndex);
+        TrayIconPanel.IsEnabled = _popup.Settings.IconPlace != IconPlace.Taskbar;
+    }
+
+    void TrayIconBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_loading && TrayIconBox.SelectedIndex >= 0)
+            _popup.SetTrayIconStyle((TrayIconStyle)TrayIconBox.SelectedIndex);
+    }
 
     void SubFoldersBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

@@ -34,6 +34,7 @@ public partial class PopupWindow
         {
             Icon = new System.Windows.Media.Imaging.BitmapImage(new Uri("pack://application:,,,/pLaunch;component/Assets/pLaunch.ico"));
         }
+        ShowTrayIcon(); // the notification area icon is the window's
     }
 
     /// <summary>"path,index" of the chosen button icon for the pinned shortcut, or null.</summary>

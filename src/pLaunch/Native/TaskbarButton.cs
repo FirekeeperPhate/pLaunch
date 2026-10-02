@@ -44,9 +44,23 @@ internal sealed class TaskbarButton
         _timer.Tick += (_, _) => AskAgain();
     }
 
+    /// <summary>False: the window lives without a taskbar button (it has a notification area icon instead).</summary>
+    public bool Wanted { get; private set; } = true;
+
+    /// <summary>Takes the button away, until the next <see cref="Request"/>.</summary>
+    public void Withdraw()
+    {
+        Wanted = false;
+        IsShown = false;
+        _timer.Stop();
+        if (!_closed)
+            _remove(_hwnd);
+    }
+
     /// <summary>Asks for the button until the shell confirms it (never for a closed window).</summary>
     public void Request()
     {
+        Wanted = true;
         if (_closed)
             return;
         _attempt = 0;
@@ -57,7 +71,7 @@ internal sealed class TaskbarButton
     void AskAgain()
     {
         _timer.Stop();
-        if (_closed || IsShown)
+        if (_closed || IsShown || !Wanted)
             return;
         _add(_hwnd);
         if (++_attempt < Delays.Length)
@@ -71,13 +85,14 @@ internal sealed class TaskbarButton
     {
         if (msg == TaskbarTab.TaskbarButtonCreatedMessage)
         {
-            IsShown = true;
+            IsShown = Wanted;
             _timer.Stop();
         }
         else if (msg == TaskbarTab.TaskbarCreatedMessage)
         {
             IsShown = false; // Explorer restarted: the shell forgot the button it was given
-            Request();
+            if (Wanted)
+                Request();
         }
         else if (msg == WM_DESTROY)
         {

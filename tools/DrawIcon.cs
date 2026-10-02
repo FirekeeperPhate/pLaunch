@@ -17,7 +17,7 @@ using System.Windows.Media.Imaging;
 //   dotnet run tools/DrawIcon.cs -- --output other.ico      -> write elsewhere
 string output = Path.Combine("src", "pLaunch", "Assets", "pLaunch.ico");
 string? previewPath = null;
-bool smooth = false;
+bool smooth = false, symbols = false;
 for (int a = 0; a < args.Length; a++)
 {
     switch (args[a])
@@ -25,7 +25,51 @@ for (int a = 0; a < args.Length; a++)
         case "--output": output = args[++a]; break;
         case "--preview": previewPath = args[++a]; break;
         case "--smooth": smooth = true; break; // small sizes as antialiased vectors too (for comparison)
+        case "--symbols": symbols = true; break;
     }
+}
+
+// The notification area versions: the two chevrons alone, white (for a dark taskbar) and black (for a
+// light one), like the Windows icons beside the clock.
+//   dotnet run tools/DrawIcon.cs -- --symbols [--preview sheet.png]
+if (symbols)
+{
+    int[] symbolSizes = [16, 20, 24, 32, 40, 48, 64];
+    foreach (var (name, color) in new[] { ("pLaunchWhite.ico", Colors.White), ("pLaunchBlack.ico", Colors.Black) })
+    {
+        var path = Path.Combine("src", "pLaunch", "Assets", name);
+        WriteIco(path, symbolSizes, s => Symbol(s, color));
+        Console.WriteLine($"Wrote {path}");
+    }
+    if (previewPath != null)
+    {
+        const int SW = 900, SH = 330;
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+        {
+            foreach (var (bg, color, top) in new[] { (C("#1F1F1F"), Colors.White, 0.0), (C("#F3F3F3"), Colors.Black, 165.0) })
+            {
+                dc.DrawRectangle(new SolidColorBrush(bg), null, new Rect(0, top, SW, 165));
+                double x = 20;
+                foreach (var s in new[] { 64, 48, 32, 24, 20, 16 })
+                {
+                    dc.DrawImage(Symbol(s, color), new Rect(x, top + 20 + (64 - s) / 2.0, s, s));
+                    x += s + 16;
+                }
+                foreach (var s in new[] { 24, 20, 16 })
+                {
+                    int f = 120 / s;
+                    dc.DrawImage(Zoom(Symbol(s, color), f), new Rect(x + 10, top + 20, s * f, s * f));
+                    x += s * f + 14;
+                }
+            }
+        }
+        var symbolSheet = new RenderTargetBitmap(SW, SH, 96, 96, PixelFormats.Pbgra32);
+        symbolSheet.Render(visual);
+        File.WriteAllBytes(previewPath, EncodePng(symbolSheet));
+        Console.WriteLine($"Wrote {previewPath}");
+    }
+    return;
 }
 
 var from = C("#3B82F6");
@@ -35,30 +79,7 @@ const byte FadedAlpha = 170; // the lower chevron
 BitmapSource Icon(int size) => size > 20 || smooth ? Vector(size) : Grid(size);
 
 // ---- the .ico: PNG entries (valid in icons since Vista)
-int[] icoSizes = [16, 20, 24, 32, 40, 48, 64, 256];
-var pngs = icoSizes.Select(s => EncodePng(Icon(s))).ToList();
-using (var stream = File.Create(output))
-using (var writer = new BinaryWriter(stream))
-{
-    writer.Write((short)0);
-    writer.Write((short)1);
-    writer.Write((short)icoSizes.Length);
-    int offset = 6 + 16 * icoSizes.Length;
-    for (int i = 0; i < icoSizes.Length; i++)
-    {
-        writer.Write((byte)(icoSizes[i] >= 256 ? 0 : icoSizes[i]));
-        writer.Write((byte)(icoSizes[i] >= 256 ? 0 : icoSizes[i]));
-        writer.Write((byte)0);
-        writer.Write((byte)0);
-        writer.Write((short)1);
-        writer.Write((short)32);
-        writer.Write(pngs[i].Length);
-        writer.Write(offset);
-        offset += pngs[i].Length;
-    }
-    foreach (var png in pngs)
-        writer.Write(png);
-}
+WriteIco(output, [16, 20, 24, 32, 40, 48, 64, 256], Icon);
 Console.WriteLine($"Wrote {output}");
 
 if (previewPath != null)
@@ -177,6 +198,78 @@ BitmapSource Grid(int size)
     var result = BitmapSource.Create(size, size, 96, 96, PixelFormats.Pbgra32, null, px, size * 4);
     result.Freeze();
     return result;
+}
+
+// The two chevrons alone, filling the icon. Up to 20 px on the pixel grid (bands of whole pixels, as in
+// Grid), above as vectors: the tile's chevrons, one and a half times as big, around the same centre.
+BitmapSource Symbol(int size, Color color)
+{
+    if (size > 20)
+    {
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+        {
+            double s = size * 1.5;
+            dc.PushTransform(new TranslateTransform((size - s) / 2, (size - s) / 2));
+            Chevron(dc, s, 0.28, color);
+            Chevron(dc, s, 0.52, Color.FromArgb(FadedAlpha, color.R, color.G, color.B));
+            dc.Pop();
+        }
+        return RenderBitmap(visual, size);
+    }
+    var (t, n, d) = size <= 16 ? (2, 6, 5) : (3, 7, 6);
+    var px = new byte[size * size * 4];
+    int a = size / 2 - 1, b = size / 2;
+    int top = (size - (d + (n - 1) + t)) / 2;
+    void Band(int apexRow, byte alpha)
+    {
+        for (int x = a - (n - 1); x <= b + (n - 1); x++)
+        {
+            int dx = x <= a ? a - x : x - b;
+            for (int dy = dx; dy < dx + t; dy++)
+            {
+                int o = ((apexRow + dy) * size + x) * 4;
+                if (px[o + 3] >= alpha)
+                    continue; // the upper chevron stays as it is where the two meet
+                // Premultiplied
+                px[o] = (byte)(color.B * alpha / 255);
+                px[o + 1] = (byte)(color.G * alpha / 255);
+                px[o + 2] = (byte)(color.R * alpha / 255);
+                px[o + 3] = alpha;
+            }
+        }
+    }
+    Band(top, 255);
+    Band(top + d, FadedAlpha);
+    var result = BitmapSource.Create(size, size, 96, 96, PixelFormats.Pbgra32, null, px, size * 4);
+    result.Freeze();
+    return result;
+}
+
+// An .ico with PNG entries (valid in icons since Vista)
+static void WriteIco(string path, int[] sizes, Func<int, BitmapSource> draw)
+{
+    var pngs = sizes.Select(s => EncodePng(draw(s))).ToList();
+    using var stream = File.Create(path);
+    using var writer = new BinaryWriter(stream);
+    writer.Write((short)0);
+    writer.Write((short)1);
+    writer.Write((short)sizes.Length);
+    int offset = 6 + 16 * sizes.Length;
+    for (int i = 0; i < sizes.Length; i++)
+    {
+        writer.Write((byte)(sizes[i] >= 256 ? 0 : sizes[i]));
+        writer.Write((byte)(sizes[i] >= 256 ? 0 : sizes[i]));
+        writer.Write((byte)0);
+        writer.Write((byte)0);
+        writer.Write((short)1);
+        writer.Write((short)32);
+        writer.Write(pngs[i].Length);
+        writer.Write(offset);
+        offset += pngs[i].Length;
+    }
+    foreach (var png in pngs)
+        writer.Write(png);
 }
 
 static BitmapSource RenderBitmap(Visual visual, int size)

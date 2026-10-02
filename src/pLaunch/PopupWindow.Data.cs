@@ -181,6 +181,7 @@ public partial class PopupWindow
         ApplyView();
         ApplyAppearance();
         ApplyListIdentity();
+        ApplyIconPlace(); // the file that came in may want the icon elsewhere
         ScheduleJumpList();
         WatchStoreFile();
         RegisterHotkeys(); // the shortcuts may be different in the file that came in

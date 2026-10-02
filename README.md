@@ -7,6 +7,12 @@ shortcuts (programs, files, folders, web links, Store apps).
 
 - **Click** the pLaunch taskbar button to open the list, or press **Win+Alt+Space** from anywhere
   (changeable in Settings); click an item to launch it.
+- **Notification area icon**: Settings → *Icon of this list* puts the icon on the taskbar, in the
+  notification area (beside the clock), or both. The icon there works like the taskbar button: a click
+  opens the list beside it, another one closes it; a right click has Open, Settings and Exit. Windows
+  keeps new icons among the hidden ones (the arrow): drag it out to have it always in sight.
+  *Notification area icon* chooses its look: the standard icon, or the symbol alone in white or in
+  black, like the Windows icons there (white for a dark taskbar, black for a light one).
 - **Search**: just start typing in the open list. It finds items in every sub-folder (accents and case
   don't matter; best matches and the most used first); Enter launches the first result, Esc clears.
 - **Run box**: the search box also opens what you type, like Win+R: a path (`C:\Projects`, `%TEMP%`),
@@ -111,6 +117,8 @@ pointer for a few seconds, only over its own windows): `dotnet run tests/ui/Menu
 `tests/ui/TaskbarButton.cs` clicks the taskbar button of a pLaunch it starts (open, close without the list
 showing up again, focus back to the window in front, slow clicks):
 `dotnet run tests/ui/TaskbarButton.cs -- <pLaunch.exe> <output folder>`.
+`tests/ui/TrayIcon.cs` does the same for the notification area icon (no taskbar button, click to open and
+close, the right-click menu): `dotnet run tests/ui/TrayIcon.cs -- <pLaunch.exe> <output folder>`.
 
 Installers (needs Inno Setup 6 or 7): `installer\build.ps1` runs the tests, publishes `publish\light` and
 `publish\full` and writes `installer\Output\pLaunch-Setup-<version>-<Light|Full>.exe`; the version comes
@@ -119,6 +127,8 @@ from `<Version>` in `src/pLaunch/pLaunch.csproj`.
 `tools/DrawIcon.cs` draws `src/pLaunch/Assets/pLaunch.ico`: a rounded tile with a blue-violet gradient
 and two white upward chevrons, vector from 24 px up and placed on the pixel grid at 16 and 20 px:
 `dotnet run tools/DrawIcon.cs` (`-- --preview sheet.png` also renders a preview on light and dark backgrounds).
+`dotnet run tools/DrawIcon.cs -- --symbols` draws the two notification area versions (`pLaunchWhite.ico`,
+`pLaunchBlack.ico`): the chevrons alone, white and black.
 
 ## How it works
 
@@ -134,6 +144,8 @@ like a popup. It is a tool window, so Alt+Tab and Win+Tab leave it out; its task
 - `Native/TaskbarButton`, `Native/TaskbarTab` — the taskbar button of a window left out of the switchers:
   asked for until the shell confirms it, again after Explorer restarts, removed on close; the minimized
   window kept off screen
+- `PopupWindow.Tray`, `Native/TrayIcon` — the notification area icon (`Shell_NotifyIcon`), instead of
+  the taskbar button or along with it
 - `PopupWindow.DragHover`, `Native/DragHoverDetector`, `Native/TaskbarHitTest` — a drag held on the
   taskbar button opens the list, whatever is dragged (the button's place is read with UI Automation when
   the drag starts)

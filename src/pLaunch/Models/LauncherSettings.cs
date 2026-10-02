@@ -42,6 +42,27 @@ public enum SubFolderMode
 /// <summary>Where "Search the web" in the search results goes; Off hides it.</summary>
 public enum WebSearch { Google, Bing, DuckDuckGo, Off }
 
+/// <summary>Where the icon that opens the list is.</summary>
+public enum IconPlace
+{
+    /// <summary>A taskbar button (can be pinned; takes drops; has the jump list).</summary>
+    Taskbar,
+    /// <summary>An icon in the notification area only: no taskbar button.</summary>
+    Tray,
+    Both,
+}
+
+/// <summary>The look of the notification area icon.</summary>
+public enum TrayIconStyle
+{
+    /// <summary>The pLaunch icon (or the one chosen for the list).</summary>
+    Standard,
+    /// <summary>The symbol alone in white, like the Windows icons there: for a dark taskbar.</summary>
+    White,
+    /// <summary>The symbol alone in black: for a light taskbar.</summary>
+    Black,
+}
+
 public sealed class LauncherSettings
 {
     public ViewMode View { get; set; } = ViewMode.List;
@@ -70,4 +91,6 @@ public sealed class LauncherSettings
     public string Hotkey { get; set; } = "Win+Alt+Space";
     public WebSearch WebSearch { get; set; } = WebSearch.Google;
     public SubFolderMode SubFolders { get; set; } = SubFolderMode.Menu;
+    public IconPlace IconPlace { get; set; } = IconPlace.Taskbar;
+    public TrayIconStyle TrayIcon { get; set; } = TrayIconStyle.Standard;
 }
