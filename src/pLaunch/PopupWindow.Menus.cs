@@ -125,6 +125,10 @@ public partial class PopupWindow
         PlaceMenu(menu, row, level);
         menu.Show();
         PlaceMenu(menu, row, level); // Show applies the window's own size first
+        // The first frame of a window that never gets activated can come out without the rows' text (seen
+        // on a busy machine: icons there, names only on the rows the pointer then crossed): everything is
+        // drawn once more when the menu has settled
+        menu.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => RedrawAll(menu));
 
         // The folder it came from stays highlighted while its menu is open
         menu.SelectionBefore = ListAt(level).SelectedItem;
